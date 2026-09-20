@@ -1,0 +1,37 @@
+[project]
+name = "ising-market"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Cole Looney", email = "colelooney22@gmail.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "matplotlib>=3.9.4",
+    "numba>=0.60.0",
+    "numpy>=2.0.2",
+    "pandas>=2.3.3",
+    "scipy>=1.13.1",
+    "yfinance>=1.2.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.31.0",
+    "pytest>=8.4.2",
+    "ruff>=0.16.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "NPY"]
