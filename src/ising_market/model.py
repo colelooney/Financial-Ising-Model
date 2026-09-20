@@ -1,8 +1,7 @@
 """
 Ising_model.py
 
-Two-dimensional Financial Ising model Monte Carlo simulation with
-Glauber.
+Network-based financial ising model
 
 """
 
@@ -14,6 +13,9 @@ import argparse
 import networkx as nx
 from scipy import stats
 import yfinance as yf
+import os
+FIGURES_DIR= "../results/figures"
+os.makedirs(FIGURES_DIR,exist_ok=True)
 
 class FinancialIsingModel:
     """
@@ -340,7 +342,7 @@ def plot_return_distributions(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
 
 
     plt.tight_layout()
-    plt.savefig("return_distributions.png", dpi=300)
+    plt.savefig(os.path.join(FIGURES_DIR,"return_distributions.png"), dpi=300)
     plt.show()
 
 def plot_volatility_clustering(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
@@ -396,7 +398,7 @@ def plot_volatility_clustering(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
         ax.legend(fontsize=8)
 
     plt.tight_layout()
-    plt.savefig("volatility_clustering.png", dpi=300)
+    plt.savefig(os.path.join(FIGURES_DIR,"volatility_clustering.png"), dpi=300)
     plt.show()
 
 def plot_susceptibility_vs_returns(N=50, T0=1.0, kappa=0.2,
@@ -459,7 +461,7 @@ def plot_susceptibility_vs_returns(N=50, T0=1.0, kappa=0.2,
             ax2.axvline(i, color='red', alpha=0.3, linewidth=0.8)
 
     plt.tight_layout()
-    plt.savefig("susceptibility_vs_returns.png", dpi=300)
+    plt.savefig(os.path.join(FIGURES_DIR,"susceptibility_vs_returns.png"), dpi=300)
     plt.show()
 
 def fetch_market_data(tickers, start='2005-01-01', end='2008-01-01'):
@@ -655,11 +657,6 @@ if __name__ == "__main__":
     )
 
     # --- Output options ---
-    parser.add_argument(
-        "--save_fig",
-        action="store_true",
-        help="Save generated plots as high-resolution PNG files."
-    )
 
     args = parser.parse_args()
 
