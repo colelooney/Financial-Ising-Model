@@ -14,7 +14,7 @@ import networkx as nx
 from scipy import stats
 import yfinance as yf
 import os
-FIGURES_DIR= "../results/figures"
+FIGURES_DIR= "results/figures"
 os.makedirs(FIGURES_DIR,exist_ok=True)
 
 class FinancialIsingModel:
