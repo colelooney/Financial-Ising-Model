@@ -609,10 +609,7 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=
-            "Monte Carlo simulation of the 2D Ising model with periodic boundary conditions.\n\n"
-            "Supports Glauber (non-conserved magnetisation) and Kawasaki "
-            "(conserved magnetisation) dynamics, with thermodynamic observables "
-            "computed via Metropolis sampling."
+            "Network-based financial ising model"
         )
 
     # --- System parameters ---
