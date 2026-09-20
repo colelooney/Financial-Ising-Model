@@ -1,8 +1,8 @@
 """
 Ising_model.py
 
-Two-dimensional Ising model Monte Carlo simulation with
-Glauber and Kawasaki dynamics.
+Two-dimensional Financial Ising model Monte Carlo simulation with
+Glauber.
 
 """
 
@@ -11,8 +11,11 @@ import matplotlib.pyplot as plt
 import math
 import matplotlib.animation as animation
 import argparse
+import networkx as nx
+from scipy import stats
+import yfinance as yf
 
-class IsingModel:
+class FinancialIsingModel:
     """
     Two-dimensional Ising model with periodic boundary conditions.
 
@@ -25,53 +28,90 @@ class IsingModel:
     - Magnetisation M = ∑ s_i
     """
 
-    def __init__(self,N,T,start_temp,end_temp,dynamic,uncertainty, J,save_fig):
+    def __init__(self, N, network_type, T0, kappa, alpha, h0):
         """
-        N: size of the grid (N x N)
-        T: Boltzmann constant times temperature
-        dynamic: 'glauber' or 'kawasaki'
-        uncertainty: 'bootstrap' or 'jackknife' for error estimation
-        J: interaction energy between neighboring spins - defaults to 1
-        k: Boltzmann constant
-        save_fig: boolean, whether to save generated plots as PNG files
+        N: Number of Agents
+        T: Initial Temperature (Uncertainty)
+        self.T0: baseline Temperature
+        kappa: Price impact factor
+        alpha: Volatility feedback strength
+        h0: External field (news/macro pressure)
+
         """
         self.N = N
-        self.T = T
-        self.start_temp = start_temp
-        self.end_temp = end_temp
-        self.dynamic = dynamic
-        self.uncertainty = uncertainty
-        self.J = J
-        self.save_fig = save_fig
-        self.grid = None
-        # self.k = 1.38e-23 # Boltzmann constant
+        self.T = T0
+        self.T0 = T0
+        self.kappa = kappa # Price impact factor
+        self.alpha = alpha #Volatiltiy feedback strenght
+        self.h = h0 # extrenal field (news/macro pressure)
+        self.network_type = network_type
+        self.sigma0 = None # baseline volatility for feedback scaling
+        self.h_trend = 0.0 # sensitivity of external field to recent returns
+        self.use_leverage = False
+        self.lev_frac     = 0.1
 
-    def pair_energy(self,i,j):
+        self.spins = None
+        self.J = None
+        self.m_prev = None
+        self.neighbors = {} #adjacency list to store neigbors for faster lookup
+
+
+        self.price = 100.0 # current price level
+        self.ret_hist = []          # log-return time series
+        self.vol_hist = []          # realised volatility history
+        self.T_hist   = []          # effective temperature history
+        self.spin_hist= []          # periodic spin snapshots
+        self.price_hist = []
+
+
+    def initialize_spins(self):
+        spins = np.random.choice([-1, 1], size=self.N)
+        self.m_prev = 0
+        return spins
+
+    def build_network(self, m=3):
+        if self.network_type == 'empirical':
+            raise RuntimeError(
+                "Use build_empirical_network(J) for empirical network type."
+            )
+        if self.network_type == 'erdos_renyi':
+            G = nx.erdos_renyi_graph(self.N, p=0.1)
+        elif self.network_type == 'barabasi_albert':
+            G = nx.barabasi_albert_graph(self.N, m=m)
+        elif self.network_type == 'small_world':
+            G = nx.watts_strogatz_graph(self.N, k=6, p=0.1)
+
+        # Adjacency list: O(1) neighbour lookup during simulation
+        self.neighbors = {i: list(G.neighbors(i)) for i in G.nodes}
+
+        # Coupling matrix: J[i,j] for connected pairs
+        self.J = np.zeros((self.N, self.N))
+        for i, j in G.edges:
+            w = np.random.uniform(0.01, 0.05)   # or from empirical data
+            self.J[i, j] = w
+            self.J[j, i] = w                   # symmetric (undirected network)
+
+    def build_empirical_network(self, J_empirical):
         """
-
-        calculate the pairwise energy of two atoms
-        i,j represent spin of respective particles
-
-        returns:
-        energy: pairwise energy between two spins
+        Load an empirically-derived coupling matrix instead of a random network.
+        J_empirical must be an N×N numpy array.
         """
+        assert J_empirical.shape == (self.N, self.N), \
+            f"J shape {J_empirical.shape} doesn't match N={self.N}"
 
-        return -self.J * i * j
+        self.J = J_empirical.copy()
 
-    def initialize_grid(self):
-        """
-        generate random initial grid of spin states, dimension N x N
-        sets spin up as +1 and spin down as -1
+        # Rebuild adjacency list from non-zero entries in J
+        self.neighbors = {
+            i: list(np.where(self.J[i] > 0)[0])
+            for i in range(self.N)
+        }
 
-        returns:
-        grid: N x N numpy array of random spiin states
-        """
+        n_edges = np.count_nonzero(self.J) // 2
+        print(f"  Empirical network loaded: {n_edges} edges")
 
-        grid = np.random.rand(self.N,self.N)
-        grid[grid >= 0.5] = 1
-        grid[grid < 0.5] = -1
-
-        return grid
+    def get_neighbors(self,i):
+        return self.neighbors[i]
 
     def flip_probability(self,delta_energy):
         """
@@ -84,18 +124,6 @@ class IsingModel:
         P = math.exp(-delta_energy/self.T)
         return P
 
-    def find_nearest_neighbors(self,i,j):
-        """
-        finds the nearest neighbors for a given point in the lattice assuming periodic boundary counditions
-        returns as list of neighbors
-
-        returns:
-
-        nearest_neighbors: list of tuples representing nearest neighbor coordinates in grid
-        """
-
-        nearest_neighbors = [((i+1)%self.N,j),((i-1)%self.N,j),(i,(j+1)%self.N),(i,(j-1)%self.N)]
-        return nearest_neighbors
 
     def glauber_energy(self):
         """
@@ -103,17 +131,15 @@ class IsingModel:
 
         returns:
         delta_energy: change in energy from proposed spin flip
-        (i,j): coordinates of the spin to be flipped
+        (i): coordinate of the spin to be flipped
         """
         i = np.random.randint(0,self.N)
-        j = np.random.randint(0,self.N)
-        energy = 0
-        flip_energy = 0
 
-        nearest_neighbors = self.find_nearest_neighbors(i,j)
+        nbrs = self.get_neighbors(i)
+        neighbor_field = np.sum(self.J[i, nbrs] * self.spins[nbrs])
 
-        delta_energy = 2 * self.J * self.grid[i,j] * sum(self.grid[neighbor] for neighbor in nearest_neighbors)
-        return delta_energy, (i,j)
+        delta_E = 2 * self.spins[i] * (neighbor_field + self.h)
+        return delta_E, (i)
         
     def glauber_update(self):
         """
@@ -122,161 +148,67 @@ class IsingModel:
         returns:
         None: updates the grid in place
         """
-        delta_energy, (i,j) = self.glauber_energy()
+        delta_energy, (i) = self.glauber_energy()
 
         if delta_energy <= 0:
-            self.grid[(i,j)] = -self.grid[(i,j)]
+            self.spins[(i)] = -self.spins[(i)]
 
         elif self.flip_probability(delta_energy) > np.random.rand():
-            self.grid[(i,j)] = -self.grid[(i,j)]
+            self.spins[(i)] = -self.spins[(i)]
         
-    def kawasaki_energy(self):
-        """
-        Calculate the change in energy for a proposed spin swap between two random sites (i_1,j_1) and (i_2,j_2)
-
-        returns:
-        delta_energy: change in energy from proposed spin swap
-        (i_1,j_1): coordinates of the first spin to be swapped
-        (i_2,j_2): coordinates of the second spin to be swapped
-        """
-        i_1 = np.random.randint(0,self.N)
-        j_1 = np.random.randint(0,self.N)
-
-        i_2 = np.random.randint(0,self.N)
-        j_2 = np.random.randint(0,self.N)
-
-        energy = 0
-        swap_energy = 0
-
-        if self.grid[i_1,j_1] == self.grid[i_2,j_2]: #skip calculation if spins are the same
-            return 0, (i_1,j_1),(i_2,j_2)
-
-        nearest_neighbors_one = self.find_nearest_neighbors(i_1,j_1)
-        nearest_neighbors_two = self.find_nearest_neighbors(i_2,j_2)
-
-        if (i_2,j_2) not in nearest_neighbors_one:
-            for neighbor in nearest_neighbors_one:
-                energy += self.pair_energy(self.grid[i_1,j_1],self.grid[neighbor])
-                swap_energy += self.pair_energy(self.grid[i_2,j_2],self.grid[neighbor])
-
-            for neighbor in nearest_neighbors_two:
-                energy += self.pair_energy(self.grid[i_2,j_2],self.grid[neighbor])
-                swap_energy += self.pair_energy(self.grid[i_1,j_1],self.grid[neighbor])
-
-        else:
-            # Can further optimise, check math
-            for neighbor in nearest_neighbors_one:
-                energy += self.pair_energy(self.grid[i_1,j_1],self.grid[neighbor])
-                temp_neighbor = (i_1,j_1) if neighbor ==  (i_2,j_2) else neighbor
-                swap_energy += self.pair_energy(self.grid[i_2,j_2],self.grid[temp_neighbor])
-
-            for neighbor in nearest_neighbors_two:
-                energy += self.pair_energy(self.grid[i_2,j_2],self.grid[neighbor])
-                temp_neighbor = (i_2,j_2) if neighbor ==  (i_1,j_1) else neighbor
-                swap_energy += self.pair_energy(self.grid[i_1,j_1],self.grid[temp_neighbor])
-
-        delta_energy = swap_energy - energy
-
-        return delta_energy, (i_1,j_1),(i_2,j_2)
-
-    def kawasaki_update(self):
-        """
-        Perform a single Kawasaki dynamics update
-
-        returns:
-        None: updates the grid in place
-        """
-        delta_energy, (i_1,j_1),(i_2,j_2) = self.kawasaki_energy()
-
-        if delta_energy <= 0:
-            self.grid[(i_1,j_1)],self.grid[(i_2,j_2)] = self.grid[(i_2,j_2)], self.grid[(i_1,j_1)]
-
-        elif self.flip_probability(delta_energy) > np.random.rand():
-            self.grid[(i_1,j_1)],self.grid[(i_2,j_2)] = self.grid[(i_2,j_2)], self.grid[(i_1,j_1)]
-
-    def bootstrap(self,data,num_samples=1000):
-        """
-        Perform bootstrap resampling to estimate the standard error of the mean.
-
-        returns:
-        standard_error: estimated standard error of the mean from bootstrap resampling
-        """
-        n = len(data)
-        means = []
-        for _ in range(num_samples):
-            sample = np.random.choice(data, size=n, replace=True)
-            means.append(np.mean(sample))
-        return np.std(means)
-    
-    def jackknife(self,data):
-        """
-        Perform jackknife resampling to estimate the standard error of the mean.
-
-        returns:
-        standard_error: estimated standard error of the mean from jackknife resampling
-        """
-        n = len(data)
-        means = []
-        for i in range(n):
-            sample = np.delete(data, i)
-            means.append(np.mean(sample))
-        mean_of_means = np.mean(means)
-        variance = (n - 1) / n * np.sum((means - mean_of_means) ** 2)
-        return np.sqrt(variance)
-    
-    def determine_magnetisation(self):
-        """
-        Calculate the total magnetisation and its square for the current grid configuration
-
-        returns:
-        M: total magnetisation of current grid configuration
-        M_squared: square of the total magnetisation
-        """
-        M = np.sum(self.grid)
-        M_squared = M**2
-        return M, M_squared
-    
-    def average_magnetisation(self):
-        """
-
-        Defunct!
-
-        Calculate the average magnetisation and average square magnetisation over multiple sweeps
-        10000 sweeps with sampling every 10 sweeps after 100 warm up sweeps
-
-        returns:
-        avg_mag: average total magnetisation over sampled sweeps
-        avg_mag_squared: average square total magnestisation over sampled sweeps
-        """
-
-        # self.grid = self.initalize_grid()
+    def market_sentiment(self):
+        """Normalised magnetisation: net order imbalance ∈ [-1, +1]"""
+        return np.sum(self.spins) / self.N
         
-        mags = []
-        mags_squared = []
-        for j in range(100): # warm up steps
-            for _ in range(self.N * self.N):
-                if self.dynamic == 'glauber':
-                    self.glauber_update()
-                elif self.dynamic == 'kawasaki':
-                    self.kawasaki_update()
-        
-        for j in range(10000):
-            for _ in range(self.N * self.N):
-                if self.dynamic == 'glauber':
-                    self.glauber_update()
-                elif self.dynamic == 'kawasaki':
-                    self.kawasaki_update()
-            
-            if j % 10 == 0:
-                # print(f"Sampling at step {j}") #debugging line
-                M,M_squared = self.determine_magnetisation()
-                mags.append(M)
-                mags_squared.append(M_squared)
-        avg_mag = sum(mags)/len(mags)
-        avg_mag_squared = sum(mags_squared)/len(mags_squared)
 
-        return avg_mag, avg_mag_squared
-    
+    def compute_return(self):
+        # Net order imbalance = magnetisation / N,  range [-1, +1]
+        m = np.sum(self.spins) / self.N
+
+        # Log-return proportional to imbalance
+        # kappa is price impact — tune to match target volatility level
+        r = self.kappa * (m)
+
+        self.price *= np.exp(r)
+        self.price_hist.append(self.price)
+        self.ret_hist.append(r)
+        # self.m_prev = m
+        return r
+        
+    def update_temperature(self, window=20):
+        if len(self.ret_hist) < window:
+            return
+
+        sigma = np.std(self.ret_hist[-window:])
+
+        if self.sigma0 is None:          # first time we have enough history
+            self.sigma0 = sigma if sigma > 0 else 1e-6
+            return                       # don't update T yet, just set baseline
+
+        self.T = self.T0 * (1.0 + self.alpha * sigma / self.sigma0)
+        self.T_hist.append(self.T)
+        self.vol_hist.append(sigma)
+
+    def update_external_field(self, window=10):
+        if len(self.ret_hist) < window:
+            return
+
+        # Positive recent returns → buy pressure → h > 0
+        # h_trend controls sensitivity; keep small (0.1–0.5) initially
+        trend  = np.mean(self.ret_hist[-window:])
+        self.h = self.h_trend * trend
+
+    def leverage_cascade(self, threshold=0.05):
+        # If the last return is a large loss, force long agents to sell
+        # Models margin calls / stop-losses / risk-limit breaches
+        if len(self.ret_hist) < 2:
+            return
+        if self.ret_hist[-1] < -threshold:
+            long_agents = np.where(self.spins == 1)[0]
+            n_forced    = int(self.lev_frac * len(long_agents))
+            forced      = np.random.choice(long_agents, n_forced, replace=False)
+            self.spins[forced] = -1              # forced sell
+
     def magnetic_susceptibility(self, avg_mag, avg_mag_squared):
         """
         Calculate the magnetic susceptibility of the system
@@ -284,286 +216,395 @@ class IsingModel:
         returns:
         chi: magnetic susceptibility
         """
-        chi = (avg_mag_squared - avg_mag**2) / (self.N**2 * self.T)
+        chi = (avg_mag_squared - avg_mag**2) / (self.N * self.T)
         return chi
     
-    # def total_energy(self):
-    #     """
-    #     Compute the total energy of the lattice for the current configuration
-    #     """
-    #     E = 0
-    #     for i in range(self.N):
-    #         for j in range(self.N):
-    #             for ni, nj in self.find_nearest_neighbors(i, j):
-    #                 E += -self.J * self.grid[i, j] * self.grid[ni, nj]
-    #     return E / 2  # remove double counting
-
-    def total_energy(self):
-        """
-        Compute the total energy of the lattice for the current configuration vectorized version
-        """
-        E = -self.J * np.sum(self.grid * np.roll(self.grid, -1, axis = 0)
-                             + self.grid * np.roll(self.grid, -1, axis = 1))
-        return E
-
-    def heat_capacity_from_energies(self, energies):
-        # small helper function to calculate heat capacity from list of energies
-        E = np.array(energies)
-        E_mean = np.mean(E)
-        E2_mean = np.mean(E**2)
-        return (E2_mean - E_mean**2) / (self.N**2 * self.T**2)
-
-    def heat_capacity(self,energies):
-        """
-        Calculate the heat capacity of the system and its uncertainty
-
-        returns:
-        C: heat capacity
-        C_error: uncertainty in heat capacity
-        """
-        C = self.heat_capacity_from_energies(energies)
-
-        if self.uncertainty == 'bootstrap':
-            C_samples = []
-            n = len(energies)
-
-            for _ in range(1000):
-                resample = np.random.choice(energies,size=n,replace=True)
-                C_samples.append(
-                    self.heat_capacity_from_energies(resample)
-                    )
-            C_error = np.std(C_samples)
-
-        elif self.uncertainty == 'jackknife':
-            C_samples = []
-            n = len(energies)
-
-            for i in range(n):
-                resample = np.delete(energies,i)
-                C_samples.append(
-                    self.heat_capacity_from_energies(resample)
-                )
-            C_mean = np.mean(C_samples)
-            C_error = np.sqrt((n - 1) / n * np.sum((C_samples - C_mean)**2))
-
-        return C, C_error
-
-    def animate(self):
-        """
-        Animate the evolution of the ising model grid over time
-
-        returns:
-        None: displays an animation of the grid evolution
-        """
-        self.grid = self.initialize_grid()
+    def system_energy(self):
+        """Total system energy: -0.5 * sum_ij J[i,j] * s_i * s_j"""
+        return -0.5 * float(self.spins @ self.J @ self.spins)
     
-        fig = plt.figure()
-        im = plt.imshow(self.grid, animated=True, cmap='binary')
-        
-        def update_frame(_):
-            for _ in range(self.N * self.N):
-                if self.dynamic == 'glauber':
-                    self.glauber_update()
-                elif self.dynamic == 'kawasaki':
-                    self.kawasaki_update()
-            im.set_array(self.grid)
-            return [im]
-        
-        ani = animation.FuncAnimation(fig, update_frame, frames=1000, interval=20, blit=True, repeat_delay=1000)
-        plt.show()
+    def run_sweep(self, record_spins=False):
+        # N single-agent update attempts = one Monte Carlo sweep
+        for _ in range(self.N):
+            delta_E, i = self.glauber_energy()
+            if delta_E <= 0 or np.random.rand() < np.exp(-delta_E / self.T):
+                self.spins[i] = -self.spins[i]
 
-    def run_data_collection(self):
-        """
-        Run the simulation over a range of temperatures and collect data for plotting
+        # Financial updates run once per sweep (not per flip)
+        r = self.compute_return()
+        self.update_temperature()
+        self.update_external_field()
+        if self.use_leverage:
+            self.leverage_cascade()  # gate behind use_leverage flag
 
-        returns:
-        total_mags: list of average magnetisations at each temperature
-        susceptibilities: list of magnetic susceptibilities at each temperature
-        energies: list of average energies at each temperature
-        heat_capacities: list of heat capacities at each temperature
-        heat_capacity_errors: list of uncertainties in heat capacities at each temperature
-        temperatures: list of temperatures simulated
+        if record_spins:
+            self.spin_hist.append(self.spins.copy())
 
-        """
+    def analyse_returns(self):
+        r = np.array(self.ret_hist)
 
-        # Determine step size for temperature sweep based on start and end temperatures
-        temp_range = self.start_temp - self.end_temp
-        step_size = -1 * temp_range / 20
+        # Kurtosis > 3 → fat tails (S&P500: typically 5–20)
+        kurt = stats.kurtosis(r, fisher=False)
 
-        #Inital Grid Generation
-        self.grid = self.initialize_grid()
+        # Jarque-Bera: p < 0.05 → reject normality
+        jb_stat, jb_p = stats.jarque_bera(r)
 
-        # Final lists to store data for all temperatures
-        total_average_mags = []
-        susceptibilities = []
-        avg_energies = []
-        heat_capacities = []
-        heat_capacity_errors = []
-        temperatures = []
+        # Fit Student-t: degrees of freedom ν ~ 3–5 for equities
+        nu, mu, sigma = stats.t.fit(r)
 
-        self.T = 3.0
+        # Volatility clustering: AC of |r_t| should be positive for many lags
+        abs_r  = np.abs(r)
+        vol_ac = [np.corrcoef(abs_r[:-k], abs_r[k:])[0,1] for k in range(1, 21)]
 
-        self.update_fn = self.glauber_update if self.dynamic == 'glauber' else self.kawasaki_update
-        for i in range(4900): # equilibration steps, warm up time of 5000 sweeps for first grid. 100 extra sweeps in each temp
-            for _ in range(self.N * self.N):
-                self.update_fn()
-        for T in np.arange(self.start_temp, self.end_temp - 0.1 * temp_range, step_size):
-            # Subtract 0.1 * range to ensure we include end_temp in the range due to floating point precision issues
-            self.T = T
-            print(f"Simulating at Temperature: {self.T} with dynamic: {self.dynamic}")
-            # Temporary lists to store data at each temperature, reset every temperature
-            temp_mags = []
-            temp_mags_squared = []
-            temp_energies = []
+        # AC of raw r_t should be ~0 (efficient markets)
+        ret_ac = [np.corrcoef(r[:-k], r[k:])[0,1] for k in range(1, 21)]
 
-            for i in range(100): # equilibration steps at each temperatures
-                for _ in range(self.N * self.N):
-                    self.update_fn()
-            for i in range(10000): # data collection steps
-                for _ in range(self.N * self.N):
-                    self.update_fn()
-                if i % 10 == 0:
-                    if self.dynamic == 'glauber':
-                        temp_mag, temp_mag_squared = self.determine_magnetisation()
-                        temp_mags.append(temp_mag)
-                        temp_mags_squared.append(temp_mag_squared)
+        return {'kurtosis': kurt, 'jb_p': jb_p,
+                't_dof': nu,   'vol_ac': vol_ac, 'ret_ac': ret_ac}
+    
+    def rolling_susceptibility(self, window=50):
+        # chi = (⟨m²⟩ - ⟨m⟩²) / T   — peaks near the critical point
+        # Rising chi = more correlated agents = rising systemic fragility
+        chi_ts = []
+        m_ts   = [np.mean(s) for s in self.spin_hist]
+        for t in range(window, len(m_ts)):
+            window_m = m_ts[t-window:t]
+            chi = (np.mean(np.array(window_m)**2) -
+                np.mean(window_m)**2)
+            chi_ts.append(chi)
+        return np.array(chi_ts)
 
-                    temp_energies.append(self.total_energy())
+def plot_return_distributions(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
+                               network_type='erdos_renyi',
+                               alphas=(0.0, 1.0, 3.0, 6.0),J_matrix=None):
+    """
+    Run the model at several alpha values and plot return distributions
+    against a fitted Gaussian. Shows how volatility feedback fattens tails.
+    """
 
-            if self.dynamic == 'glauber':
-                #Only calculate magnetisation and susceptibility for glauber dynamics
-                avg_mag = np.mean(np.abs(temp_mags))
-                avg_mag_squared = np.mean(temp_mags_squared)
-                chi = self.magnetic_susceptibility(avg_mag, avg_mag_squared)
-                total_average_mags.append(avg_mag)
-                susceptibilities.append(chi)
-            else:
-                total_average_mags.append(np.nan)
-                susceptibilities.append(np.nan)
+    fig, axes = plt.subplots(1, len(alphas), figsize=(4 * len(alphas), 4),
+                             sharey=False)
+    fig.suptitle("Return distributions: effect of volatility feedback (α)",
+                 fontsize=13)
 
-            avg_energy = np.mean(temp_energies)
-            C, C_error = self.heat_capacity(temp_energies)
-            avg_energies.append(avg_energy)
-            heat_capacities.append(C)
-            heat_capacity_errors.append(C_error)
+    for ax, alpha in zip(axes, alphas):
 
-            temperatures.append(self.T)
-
-        return total_average_mags, susceptibilities, avg_energies, heat_capacities,heat_capacity_errors, temperatures
-        
-    def plot_data(self, total_mags, susceptibilities, energies,
-                heat_capacities, heat_capacity_errors, temperatures):
-
-        plt.rcParams.update({
-            "font.size": 11,
-            "axes.labelsize": 12,
-            "axes.titlesize": 12,
-            "xtick.labelsize": 10,
-            "ytick.labelsize": 10,
-            "lines.linewidth": 2,
-            "figure.dpi": 300
-        })
-
-        if self.dynamic == "glauber":
-            fig, axes = plt.subplots(2, 2, figsize=(11, 9))
-            axes = axes.flatten()
-        else:
-            fig, axes = plt.subplots(1, 2, figsize=(11, 4))
-            axes = axes.flatten()
-
-        # --- Energy ---
-        axes[0].plot(temperatures, energies, marker='o', markersize=4)
-        axes[0].set_xlabel(r"Temperature $T$")
-        axes[0].set_ylabel(r"Total Energy $E$")
-        axes[0].grid(alpha=0.3)
-        axes[0].set_title("(a) Energy")
-
-        # --- Heat capacity ---
-        axes[1].errorbar(
-            temperatures,
-            heat_capacities,
-            yerr=heat_capacity_errors,
-            fmt='o-',
-            markersize=4,
-            capsize=3
+        # Fresh model for each alpha
+        model = FinancialIsingModel(
+            N=N, network_type=network_type,
+            T0=T0, kappa=kappa, alpha=alpha, h0=0.0
         )
-        axes[1].set_xlabel(r"Temperature $T$")
-        axes[1].set_ylabel(r"Heat Capacity per Spin $C$")
-        axes[1].grid(alpha=0.3)
-        if self.dynamic == 'glauber':
-            axes[1].axvline(x=2.27,color = 'r', linestyle='--', label='Critical Temperature $T_c$')
-        axes[1].set_title("(b) Heat capacity")
+        model.spins = model.initialize_spins()
+        if J_matrix is not None:
+            model.build_empirical_network(J_matrix)
+        else:
+            model.build_network()
 
-        if self.dynamic == "glauber":
-            # --- Magnetisation ---
-            axes[2].plot(temperatures, total_mags, marker='o', markersize=4)
-            axes[2].set_xlabel(r"Temperature $T$")
-            axes[2].set_ylabel(r"Average Magnetisation $|M|$")
-            axes[2].grid(alpha=0.3)
-            axes[2].set_title("(c) Magnetisation")
+        # Burn-in: let the system reach a stationary state before recording
+        for _ in range(200):
+            model.run_sweep()
 
-            # --- Susceptibility ---
-            axes[3].plot(temperatures, susceptibilities, marker='o', markersize=4)
-            axes[3].set_xlabel(r"Temperature $T$")
-            axes[3].set_ylabel(r"Susceptibility $\chi$")
-            axes[3].axvline(x=2.27,color = 'r', linestyle='--', label='Critical Temperature $T_c$')
-            axes[3].grid(alpha=0.3)
-            axes[3].set_title("(d) Susceptibility")
+        # Reset histories so burn-in returns don't contaminate the sample
+        model.ret_hist  = []
+        model.vol_hist  = []
+        model.T_hist    = []
+        # model.sigma0    = None   # re-initialise baseline vol on clean data
 
-        plt.tight_layout()
-        if self.save_fig:
-            plt.savefig(
-                f"ising_plots_{self.dynamic}_{self.uncertainty}_N{self.N}_T{self.start_temp}.png",
-                dpi=300,
-                bbox_inches="tight"
-            )
-        plt.show()
+        for _ in range(n_sweeps):
+            model.run_sweep()
 
-    def plot_stored_data(self):
-        """
-        Docstring for plot_stored_data
-        
-        :param self: Description
-        """
-        try:
-            data = np.loadtxt(f'ising_data_{self.dynamic}_N{self.N}_T{self.start_temp}.csv', delimiter=',', skiprows=1)
-        except FileNotFoundError:
-            raise RuntimeError(
-                f"No stored data found for dynamic={self.dynamic}, N={self.N}"
-            )
-        temperatures = data[:, 0]
-        total_mags = data[:, 1]
-        susceptibilities = data[:, 2]
-        energies = data[:, 3]
-        heat_capacities = data[:, 4]
-        heat_capacity_errors = data[:,5]
+        r = np.array(model.ret_hist)
 
-        self.plot_data(total_mags, susceptibilities, energies, heat_capacities, heat_capacity_errors, temperatures)
+        # --- Histogram (density=True so it integrates to 1) ---
+        ax.hist(r, bins=60, density=True, color='steelblue',
+                alpha=0.6, label='Simulated returns')
+
+        # --- Fitted Gaussian overlay ---
+        mu, sigma = r.mean(), r.std()
+        x = np.linspace(r.min(), r.max(), 400)
+        ax.plot(x, stats.norm.pdf(x, mu, sigma),
+                color='crimson', linewidth=2, label='Fitted Gaussian')
+
+        # --- Annotations ---
+        kurt  = stats.kurtosis(r, fisher=False)   # excess = kurt - 3
+        _, jb_p = stats.jarque_bera(r)
+
+        ax.set_title(f"α = {alpha}", fontsize=12)
+        ax.set_xlabel("Log return")
+        ax.set_ylabel("Density")
+        textstr = f"Kurtosis: {kurt:.2f}\nJB p: {jb_p:.3f}"
+        ax.text(0.97, 0.95, textstr, transform=ax.transAxes,
+                fontsize=9, verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+        ax.legend(fontsize=8)
 
 
-    def store_data(self, total_mags, susceptibilities, energies, heat_capacities,heat_capacity_uncertainty, temperatures):
-        """
-        Store the collected data in a CSV file
-        ising_data_{dynamic}_N{N}.csv
+    plt.tight_layout()
+    plt.savefig("return_distributions.png", dpi=300)
+    plt.show()
 
-        returns:
-        None: saves data to CSV file
-        """
-        data = np.array([temperatures, total_mags, susceptibilities, energies, heat_capacities,heat_capacity_uncertainty])
-        np.savetxt(f'ising_data_{self.dynamic}_N{self.N}_T{self.start_temp}.csv', data.T, delimiter=',', header='Temperature,Average Magnetisation,Magnetic Susceptibility,Average Energy,Heat Capacity', comments='')
+def plot_volatility_clustering(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
+                                network_type='erdos_renyi',
+                                alphas=(0.0, 3.0, 6.0),J_matrix=None):
+    """
+    Tests for volatility clustering: AC(|r_t|) should be positive and slow-decaying.
+    AC(r_t) should be ~0. The gap between them is the signature of clustering.
+    """
+    fig, axes = plt.subplots(1, len(alphas), figsize=(5 * len(alphas), 4))
+    fig.suptitle("Volatility clustering: autocorrelation of returns vs |returns|",
+                 fontsize=13)
 
-    def run(self):
-        """
-        Run the full simulation: data collection, plotting, and storing
+    for ax, alpha in zip(axes, alphas):
+        model = FinancialIsingModel(
+            N=N, network_type=network_type,
+            T0=T0, kappa=kappa, alpha=alpha, h0=0.0
+        )
+        model.spins = model.initialize_spins()
+        if J_matrix is not None:
+            model.build_empirical_network(J_matrix)
+        else:
+            model.build_network()
 
-        returns:
-        None: executes the full simulation process
+        for _ in range(500):          # burn-in
+            model.run_sweep()
+
+        model.ret_hist = []
+        model.vol_hist = []
+        model.T_hist   = []
+
+        for _ in range(n_sweeps):
+            model.run_sweep()
+
+        results = model.analyse_returns()
+        lags = range(1, 21)
+
+        ax.plot(lags, results['vol_ac'], 'o-', color='steelblue',
+                linewidth=2, markersize=4, label='AC of |rₜ| (vol clustering)')
+        ax.plot(lags, results['ret_ac'], 's--', color='crimson',
+                linewidth=2, markersize=4, label='AC of rₜ (return)')
+        ax.axhline(0, color='black', linewidth=0.8, linestyle=':')
+
+        # Significance bands: ±1.96/√n
+        sig = 1.96 / np.sqrt(n_sweeps)
+        ax.axhline( sig, color='gray', linewidth=0.8, linestyle='--', alpha=0.5)
+        ax.axhline(-sig, color='gray', linewidth=0.8, linestyle='--', alpha=0.5)
+
+        ax.set_title(f"α = {alpha}", fontsize=12)
+        ax.set_xlabel("Lag (sweeps)")
+        ax.set_ylabel("Autocorrelation")
+        ax.set_ylim(-0.15, 0.5)
+        ax.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig("volatility_clustering.png", dpi=300)
+    plt.show()
+
+def plot_susceptibility_vs_returns(N=50, T0=1.0, kappa=0.2,
+                                    n_sweeps=2000, alpha=3.0,
+                                    network_type='erdos_renyi', J_matrix=None):
+    """
+    Plots rolling susceptibility aligned with returns.
+    Tests whether chi spikes precede large market moves.
+    """
+    model = FinancialIsingModel(
+        N=N, network_type=network_type,
+        T0=T0, kappa=kappa, alpha=alpha, h0=0.0
+    )
+    model.spins = model.initialize_spins()
+    if J_matrix is not None:
+        model.build_empirical_network(J_matrix)
+    else:
+        model.build_network()
+
+    for _ in range(500):
+        model.run_sweep()
+
+    model.ret_hist  = []
+    model.vol_hist  = []
+    model.T_hist    = []
+    model.spin_hist = []
+
+    # record_spins=True every sweep — needed for rolling_susceptibility
+    for _ in range(n_sweeps):
+        model.run_sweep(record_spins=True)
+
+    chi = model.rolling_susceptibility(window=50)
+
+    # Align: chi starts at index 50 of spin_hist
+    ret_array = np.array(model.ret_hist)
+    aligned_rets = ret_array[50:]           # match chi length
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    fig.suptitle(f"Rolling susceptibility vs returns  (α={alpha})", fontsize=13)
+
+    sweeps = np.arange(len(chi))
+
+    ax1.plot(sweeps, chi, color='darkorange', linewidth=1.2)
+    ax1.set_ylabel("Susceptibility χ")
+    ax1.set_title("Rolling susceptibility — peaks signal fragility")
+    ax1.grid(alpha=0.3)
+
+    ax2.plot(sweeps, aligned_rets, color='steelblue', linewidth=0.8)
+    ax2.set_ylabel("Log return")
+    ax2.set_xlabel("Sweep")
+    ax2.set_title("Log returns")
+    ax2.grid(alpha=0.3)
+
+    # Shade large negative return events so you can visually check
+    # whether chi spikes preceded them
+    threshold = np.percentile(aligned_rets, 1)   # bottom 5% = extreme moves
+    for i, r in enumerate(aligned_rets):
+        if r < threshold:
+            ax1.axvline(i, color='red', alpha=0.3, linewidth=0.8)
+            ax2.axvline(i, color='red', alpha=0.3, linewidth=0.8)
+
+    plt.tight_layout()
+    plt.savefig("susceptibility_vs_returns.png", dpi=300)
+    plt.show()
+
+def fetch_market_data(tickers, start='2005-01-01', end='2008-01-01'):
+    """
+    Download adjusted close prices and compute log returns.
+    Returns the return DataFrame and correlation matrix.
+    """
+    print(f"Downloading {len(tickers)} tickers from {start} to {end}...")
+    prices = yf.download(tickers, start=start, end=end, 
+                         auto_adjust=True, progress=False)['Close']
     
-        """
-        total_mags, susceptibilities, energies, heat_capacities, heat_capacity_errors, temperatures = self.run_data_collection()
-        self.plot_data(total_mags, susceptibilities, energies, heat_capacities, heat_capacity_errors, temperatures)
-        self.store_data(total_mags, susceptibilities, energies, heat_capacities,heat_capacity_errors, temperatures) 
-        
+    # Drop any tickers that failed to download
+    prices = prices.dropna(axis=1, how='all')
+    valid_tickers = list(prices.columns)
+    if len(valid_tickers) < len(tickers):
+        dropped = set(tickers) - set(valid_tickers)
+        print(f"  Warning: dropped {dropped} (no data)")
+
+    rets = np.log(prices / prices.shift(1)).dropna()
+    print(f"  {len(valid_tickers)} tickers, {len(rets)} trading days")
+    return rets, valid_tickers
+
+def build_empirical_J(rets, threshold=0.3,normalize=True):
+    """
+    Build coupling matrix from return correlations.
+    Only keeps pairs with correlation above threshold — sparse financial network.
+    Returns J matrix, the full correlation matrix, and edge count.
+    """
+    C = rets.corr().values
+    N = C.shape[0]
+
+    J = np.where(C > threshold, C, 0.0)
+    np.fill_diagonal(J, 0.0)
+
+    if normalize:
+        nonzero = J[J>0]
+        if len(nonzero) > 0:
+            J = J * (0.1 / nonzero.mean())
+
+
+    n_edges = np.count_nonzero(J) // 2
+    density = n_edges / (N * (N - 1) / 2)
+    print(f"  Network: N={N}, edges={n_edges}, density={density:.2%}, "
+          f"threshold={threshold}")
+    return J, C
+
+def calibrate_parameters(rets, J_empirical, target_vol=0.01,
+                          T0_search=None, n_pilot=3000):
+    """
+    Derives kappa and T0 from real return data.
+
+    target_vol: annualised daily vol to match (S&P500 ≈ 0.01 per day)
+    T0_search:  list of T0 values to scan; auto-set if None
+    n_pilot:    sweeps per pilot run
+
+    Returns dict with calibrated kappa, T0, sigma0, and diagnostics.
+    """
+    N = J_empirical.shape[0]
+
+    # --- Step 1: measure empirical baseline vol ---
+    sigma_empirical = rets.std().mean()   # mean daily vol across tickers
+    print(f"\nEmpirical mean daily vol: {sigma_empirical:.4f}")
+    print(f"Target vol:               {target_vol:.4f}")
+
+    # --- Step 2: scan T0 to find disordered regime ---
+    # At alpha=0, kurtosis should be close to 3 (Gaussian)
+    # Too low T0 → kurtosis >> 3 even at alpha=0 (system ordered)
+    # Too high T0 → all dynamics wash out
+
+    if T0_search is None:
+        mean_J      = np.sum(J_empirical) / np.count_nonzero(J_empirical)
+        degrees     = np.sum(J_empirical > 0, axis=1)
+        mean_degree = np.mean(degrees)
+        T_c_est     = mean_degree * mean_J
+        # Scan from 0.5×T_c up to 3×T_c — need to cross the transition
+        T0_search = np.concatenate([
+            np.linspace(T_c_est * 0.5, T_c_est * 1.0, 6),   # below/at T_c
+            np.linspace(T_c_est * 1.0, T_c_est * 2.0, 6),   # above T_c
+        ])
+        print(f"\nEstimated T_c ≈ {T_c_est:.3f}")
+        print(f"Scanning T0 in {T0_search.round(3)}")
+
+    kurtosis_by_T0 = {}
+    m_std_by_T0    = {}
+
+    for T0 in T0_search:
+        model = FinancialIsingModel(
+            N=N, network_type='empirical',
+            T0=T0, kappa=1.0,   # kappa=1 so m_std is undistorted
+            alpha=0.0, h0=0.0
+        )
+        model.spins = model.initialize_spins()
+        model.build_empirical_network(J_empirical)
+
+        # Burn-in
+        for _ in range(300):
+            model.run_sweep()
+
+        model.ret_hist = []
+
+        for _ in range(n_pilot):
+            model.run_sweep()
+
+        r    = np.array(model.ret_hist)
+        kurt = stats.kurtosis(r, fisher=False)
+        m_std_by_T0[T0]    = r.std()     # std of m since kappa=1
+        kurtosis_by_T0[T0] = kurt
+        print(f"  T0={T0:.3f}  kurtosis={kurt:.2f}  m_std={r.std():.4f}")
+
+
+    candidates = {t: k for t, k in kurtosis_by_T0.items() 
+              if 2.8 <= k <= 3.5}
+    
+    # Pick T0 where kurtosis is closest to 3.0 (Gaussian baseline)
+    if candidates:
+        best_T0 = min(candidates.keys())   # lowest T0 in the Gaussian regime
+    else:
+        # Fallback: kurtosis closest to 3 from above
+        above_3 = {t: k for t, k in kurtosis_by_T0.items() if k >= 3.0}
+        if above_3:
+            best_T0 = min(above_3, key=lambda t: above_3[t] - 3.0)
+        else:
+            best_T0 = min(kurtosis_by_T0, key=lambda t: abs(kurtosis_by_T0[t] - 3.0))
+            print("  Warning: no T0 found with kurtosis >= 3. "
+                "Scan may not go low enough — try extending T0_search downward.")
+    m_std   = m_std_by_T0[best_T0]
+
+    # --- Step 3: derive kappa from target vol ---
+    # r = kappa * m  →  std(r) = kappa * std(m)
+    # We want std(r) = target_vol  →  kappa = target_vol / std(m)
+    kappa = target_vol / m_std if m_std > 0 else 0.01
+    
+    print(f"\nCalibrated parameters:")
+    print(f"  T0    = {best_T0:.4f}  (kurtosis={kurtosis_by_T0[best_T0]:.2f} at alpha=0)")
+    print(f"  kappa = {kappa:.4f}  (targets daily vol={target_vol:.3f})")
+    print(f"  sigma0 will be set from burn-in (baseline vol={sigma_empirical:.4f})")
+
+    return {
+        'T0':               best_T0,
+        'kappa':            kappa,
+        'sigma0_empirical': sigma_empirical,
+        'kurtosis_scan':    kurtosis_by_T0,
+        'm_std':            m_std_by_T0,
+    }
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -594,55 +635,14 @@ if __name__ == "__main__":
         )
     )
 
-    parser.add_argument(
-        "--start_temp", "-tmax",
-        type = float,
-        default = 3.0,
-        metavar = "T_MAX",
-        help = "Starting temperature for temperature sweeps (default: 3.0), greater than end temp"
-    )
-    
-    parser.add_argument(
-        "--end_temp", "-tmin",
-        type = float,
-        default = 1.0,
-        metavar = "T_MIN",
-        help = "Ending temperature for temperature sweeps (default: 1.0), less than start temp"
-    )
-
-    parser.add_argument(
-        "-J", "--coupling",
-        type=float,
-        default=1.0,
-        metavar="J",
-        help=(
-            "Nearest-neighbour coupling constant. "
-            "Positive J corresponds to the ferromagnetic Ising model."
-        )
-    )
-
-
-    # --- Algorithmic choices ---
-    parser.add_argument(
-        "--dynamic",
-        choices=["glauber", "kawasaki"],
-        default="glauber",
-        help=(
-            "Choice of Monte Carlo dynamics:\n"
-            "  glauber  – single-spin flips (magnetisation not conserved)\n"
-            "  kawasaki – spin exchanges (magnetisation conserved)"
-        )
-    )
-
-    parser.add_argument(
-        "--uncertainty",
-        choices=["bootstrap", "jackknife"],
-        default="bootstrap",
-        help=(
-            "Statistical method used to estimate uncertainties "
-            "in the heat capacity."
-        )
-    )
+    parser.add_argument("--network", choices=["erdos_renyi","barabasi_albert","small_world"],
+                        default="erdos_renyi")
+    parser.add_argument("--kappa",  type=float, default=0.01,
+                        help="Price impact coefficient")
+    parser.add_argument("--alpha",  type=float, default=0.0,
+                        help="Volatility feedback strength (0 = no feedback)")
+    parser.add_argument("--h0",     type=float, default=0.0,
+                        help="Initial external field (news/macro pressure)")
 
     # --- Execution mode ---
     parser.add_argument(
@@ -667,20 +667,74 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     
-    model = IsingModel(
-        N=args.size,
-        T=args.temperature,
-        start_temp = args.start_temp,
-        end_temp = args.end_temp,
-        dynamic=args.dynamic,
-        uncertainty=args.uncertainty,
-        J=args.coupling,
-        save_fig=args.save_fig
+
+    TICKERS = [
+        'AAPL','MSFT','AMZN','INTC','CSCO',          # tech (pre-2005)
+        'JPM','BAC','GS','WFC','C',                   # financials
+        'XOM','CVX','COP',                             # energy
+        'JNJ','PFE','UNH','MRK',                       # healthcare
+        'WMT','HD','MCD',                              # consumer
+        'CAT','GE','MMM','BA',                         # industrials
+        'DIS','TWX',                                   # media (TWX = Time Warner)
+        'AMD','IBM','ORCL','TXN'                       # semiconductors
+    ]
+
+    rets, valid_tickers = fetch_market_data(
+        TICKERS, start='2005-01-01', end='2008-01-01'
+    )
+    N = len(valid_tickers)
+
+    J_emp, C_emp = build_empirical_J(rets, threshold=0.3,normalize=True)
+
+    calib = calibrate_parameters(rets, J_emp, target_vol=0.01)
+    print("\nFull kurtosis scan:")
+    for t, k in sorted(calib['kurtosis_scan'].items()):
+        marker = " ← selected" if abs(t - calib['T0']) < 1e-9 else ""
+        print(f"  T0={t:.3f}  kurtosis={k:.2f}{marker}")
+    T0_cal    = calib['T0']
+    kappa_cal = calib['kappa']
+
+    model = FinancialIsingModel(
+        N=N, network_type='empirical',
+        T0=T0_cal, kappa=kappa_cal,
+        alpha=2.0, h0=0.0
     )
 
-    if args.mode == 'run':
-        model.run()
-    elif args.mode == 'animate':
-        model.animate()
-    elif args.mode == 'plot':
-        model.plot_stored_data()
+    model.spins = model.initialize_spins()
+    model.build_empirical_network(J_emp)
+    model.sigma0 = calib['sigma0_empirical']
+
+    for t in range(1000):
+        model.run_sweep(record_spins=(t % 10 == 0))
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3))
+    axes[0].plot(model.ret_hist)
+    axes[0].set_title("Log returns")
+    axes[0].set_xlabel("Sweep")
+    axes[1].plot(model.T_hist)
+    axes[1].set_title("Effective temperature T(t)")
+    axes[1].set_xlabel("Sweep")
+    axes[2].plot(model.price_hist)
+    axes[2].set_title("Price path")
+    axes[2].set_xlabel("Sweep")
+    plt.tight_layout()
+    plt.show()
+
+    print(f"\nCalibrated model diagnostics:")
+    print(f"  N agents     : {N}")
+    print(f"  T0           : {T0_cal:.4f}")
+    print(f"  kappa        : {kappa_cal:.4f}")
+    print(f"  Final T      : {model.T:.4f}")
+    print(f"  Final price  : {model.price:.2f}")
+
+
+    plot_return_distributions(
+        N=N, T0=T0_cal, kappa=kappa_cal,
+        network_type='empirical',
+        n_sweeps=5000,
+        J_matrix=J_emp
+    )
+    plot_volatility_clustering(N=N, T0=T0_cal, kappa=kappa_cal, n_sweeps=5000,
+                                network_type='empirical', J_matrix=J_emp)
+    plot_susceptibility_vs_returns(N=N, T0=T0_cal, kappa=kappa_cal, n_sweeps=5000,
+                                network_type='empirical', J_matrix=J_emp)
