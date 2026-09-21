@@ -70,8 +70,11 @@ class FinancialIsingModel:
         self.m_hist = []
 
 
-    def initialize_spins(self):
-        spins = self.rng.choice([-1, 1], size=self.N)
+    def initialize_spins(self,start = 'random'):
+        if start == 'random':
+            spins = self.rng.choice([-1, 1], size=self.N)
+        if start == 'up':
+            spins = np.ones(self.N, dtype=int)
         self.m_prev = 0
         return spins
 
@@ -499,7 +502,7 @@ def fetch_market_data(tickers, start='2005-01-01', end='2008-01-01'):
     print(f"  {len(valid_tickers)} tickers, {len(rets)} trading days")
     return rets, valid_tickers
 
-def build_empirical_J(rets, threshold=0.3,normalize=True):
+def build_empirical_J(rets, threshold=0.3,normalize=True,verbose=True):
     """
     Build coupling matrix from return correlations.
     Only keeps pairs with correlation above threshold — sparse financial network.
@@ -519,16 +522,34 @@ def build_empirical_J(rets, threshold=0.3,normalize=True):
 
     n_edges = np.count_nonzero(J) // 2
     density = n_edges / (N * (N - 1) / 2)
-    print(f"  Network: N={N}, edges={n_edges}, density={density:.2%}, "
+    if verbose:
+        print(f"  Network: N={N}, edges={n_edges}, density={density:.2%}, "
           f"threshold={threshold}")
     return J, C
 
+def _run_pilot(J,T0,rng,start,n_burn,n_pilot):
+    N = J.shape[0]
+    model = FinancialIsingModel(N=N,network_type='empirical',T0=T0,
+                                kappa=1.0,alpha=0.0,h0=0.0,rng=rng)
+
+    model.spins = model.initialize_spins(start=start)
+    model.build_empirical_network(J)
+    for _ in range(n_burn):
+        model.run_sweep()
+
+    model.ret_hist = []
+    model.m_hist = []
+    for _ in range(n_pilot):
+        model.run_sweep()
+    return np.array(model.m_hist)
+
 def calibrate_parameters(rets, J_empirical, target_vol=0.01,
-                          T0_search=None, n_pilot=3000):
+                          T0_search=None, n_pilot=10000, n_seeds=8,
+                          n_burn=2000,seed=42,window=20):
     """
     Derives kappa and T0 from real return data.
 
-    target_vol: annualised daily vol to match (S&P500 ≈ 0.01 per day)
+    target_vol: daily vol to match (S&P500 ≈ 0.01 per day)
     T0_search:  list of T0 values to scan; auto-set if None
     n_pilot:    sweeps per pilot run
 
@@ -546,80 +567,30 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
     # Too low T0 → kurtosis >> 3 even at alpha=0 (system ordered)
     # Too high T0 → all dynamics wash out
 
+    lam = np.linalg.eigvalsh(J_empirical).max() # mean-field crossover estimate
     if T0_search is None:
-        mean_J      = np.sum(J_empirical) / np.count_nonzero(J_empirical)
-        degrees     = np.sum(J_empirical > 0, axis=1)
-        mean_degree = np.mean(degrees)
-        T_c_est     = mean_degree * mean_J
-        # Scan from 0.5×T_c up to 3×T_c — need to cross the transition
-        T0_search = np.concatenate([
-            np.linspace(T_c_est * 0.5, T_c_est * 1.0, 6),   # below/at T_c
-            np.linspace(T_c_est * 1.0, T_c_est * 2.0, 6),   # above T_c
-        ])
-        print(f"\nEstimated T_c ≈ {T_c_est:.3f}")
-        print(f"Scanning T0 in {T0_search.round(3)}")
+        T0_search = np.geomspace(0.3 * lam, 1.3 * lam, 17)
+    print(f"lambda_max(J) = {lam:.4f}")
+    print(f"Scanning T0 in {T0_search.round(4)}")
 
     kurtosis_by_T0 = {}
     m_std_by_T0    = {}
 
-    for T0 in T0_search:
-        model = FinancialIsingModel(
-            N=N, network_type='empirical',
-            T0=T0, kappa=1.0,   # kappa=1 so m_std is undistorted
-            alpha=0.0, h0=0.0
-        )
-        model.spins = model.initialize_spins()
-        model.build_empirical_network(J_empirical)
+    runs = []
+    for i_T0,T0 in enumerate(T0_search):
+        for seed_id in range(n_seeds):
+            for start in ['random','up']:
+                run_rng = np.random.default_rng([seed, i_T0, seed_id, 0 if start == 'random' else 1])
+                m = _run_pilot(J_empirical, T0, run_rng, start, n_burn, n_pilot)
+                runs.append({'T0': T0, 'i_T0': i_T0, 'seed_id': seed_id, 'start': start, 'm': m})
 
-        # Burn-in
-        for _ in range(300):
-            model.run_sweep()
-
-        model.ret_hist = []
-
-        for _ in range(n_pilot):
-            model.run_sweep()
-
-        r    = np.array(model.ret_hist)
-        kurt = stats.kurtosis(r, fisher=False)
-        m_std_by_T0[T0]    = r.std()     # std of m since kappa=1
-        kurtosis_by_T0[T0] = kurt
-        print(f"  T0={T0:.3f}  kurtosis={kurt:.2f}  m_std={r.std():.4f}")
-
-
-    candidates = {t: k for t, k in kurtosis_by_T0.items() 
-              if 2.8 <= k <= 3.5}
-    
-    # Pick T0 where kurtosis is closest to 3.0 (Gaussian baseline)
-    if candidates:
-        best_T0 = min(candidates.keys())   # lowest T0 in the Gaussian regime
-    else:
-        # Fallback: kurtosis closest to 3 from above
-        above_3 = {t: k for t, k in kurtosis_by_T0.items() if k >= 3.0}
-        if above_3:
-            best_T0 = min(above_3, key=lambda t: above_3[t] - 3.0)
-        else:
-            best_T0 = min(kurtosis_by_T0, key=lambda t: abs(kurtosis_by_T0[t] - 3.0))
-            print("  Warning: no T0 found with kurtosis >= 3. "
-                "Scan may not go low enough — try extending T0_search downward.")
-    m_std   = m_std_by_T0[best_T0]
-
-    # --- Step 3: derive kappa from target vol ---
-    # r = kappa * m  →  std(r) = kappa * std(m)
-    # We want std(r) = target_vol  →  kappa = target_vol / std(m)
-    kappa = target_vol / m_std if m_std > 0 else 0.01
-    
-    print(f"\nCalibrated parameters:")
-    print(f"  T0    = {best_T0:.4f}  (kurtosis={kurtosis_by_T0[best_T0]:.2f} at alpha=0)")
-    print(f"  kappa = {kappa:.4f}  (targets daily vol={target_vol:.3f})")
-    print(f"  sigma0 will be set from burn-in (baseline vol={sigma_empirical:.4f})")
+    print(f"\n{len(runs)} pilot runs completed.")
 
     return {
-        'T0':               best_T0,
-        'kappa':            kappa,
-        'sigma0_empirical': sigma_empirical,
-        'kurtosis_scan':    kurtosis_by_T0,
-        'm_std':            m_std_by_T0,
+        'runs':            runs,
+        'T0_search':       T0_search,
+        'lam':             lam,
+        'sigma_empirical': sigma_empirical,
     }
 
 
@@ -692,58 +663,3 @@ if __name__ == "__main__":
         TICKERS, start='2005-01-01', end='2008-01-01'
     )
     N = len(valid_tickers)
-
-    J_emp, C_emp = build_empirical_J(rets, threshold=0.3,normalize=True)
-
-    calib = calibrate_parameters(rets, J_emp, target_vol=0.01)
-    print("\nFull kurtosis scan:")
-    for t, k in sorted(calib['kurtosis_scan'].items()):
-        marker = " ← selected" if abs(t - calib['T0']) < 1e-9 else ""
-        print(f"  T0={t:.3f}  kurtosis={k:.2f}{marker}")
-    T0_cal    = calib['T0']
-    kappa_cal = calib['kappa']
-
-    model = FinancialIsingModel(
-        N=N, network_type='empirical',
-        T0=T0_cal, kappa=kappa_cal,
-        alpha=2.0, h0=0.0
-    )
-
-    model.spins = model.initialize_spins()
-    model.build_empirical_network(J_emp)
-    model.sigma0 = calib['sigma0_empirical']
-
-    for t in range(1000):
-        model.run_sweep(record_spins=(t % 10 == 0))
-
-    fig, axes = plt.subplots(1, 3, figsize=(13, 3))
-    axes[0].plot(model.ret_hist)
-    axes[0].set_title("Log returns")
-    axes[0].set_xlabel("Sweep")
-    axes[1].plot(model.T_hist)
-    axes[1].set_title("Effective temperature T(t)")
-    axes[1].set_xlabel("Sweep")
-    axes[2].plot(model.price_hist)
-    axes[2].set_title("Price path")
-    axes[2].set_xlabel("Sweep")
-    plt.tight_layout()
-    plt.show()
-
-    print(f"\nCalibrated model diagnostics:")
-    print(f"  N agents     : {N}")
-    print(f"  T0           : {T0_cal:.4f}")
-    print(f"  kappa        : {kappa_cal:.4f}")
-    print(f"  Final T      : {model.T:.4f}")
-    print(f"  Final price  : {model.price:.2f}")
-
-
-    plot_return_distributions(
-        N=N, T0=T0_cal, kappa=kappa_cal,
-        network_type='empirical',
-        n_sweeps=5000,
-        J_matrix=J_emp
-    )
-    plot_volatility_clustering(N=N, T0=T0_cal, kappa=kappa_cal, n_sweeps=5000,
-                                network_type='empirical', J_matrix=J_emp)
-    plot_susceptibility_vs_returns(N=N, T0=T0_cal, kappa=kappa_cal, n_sweeps=5000,
-                                network_type='empirical', J_matrix=J_emp)
