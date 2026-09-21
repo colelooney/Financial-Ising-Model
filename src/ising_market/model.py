@@ -14,6 +14,7 @@ import networkx as nx
 from scipy import stats
 import yfinance as yf
 import os
+
 FIGURES_DIR= "results/figures"
 os.makedirs(FIGURES_DIR,exist_ok=True)
 
@@ -30,7 +31,7 @@ class FinancialIsingModel:
     - Magnetisation M = ∑ s_i
     """
 
-    def __init__(self, N, network_type, T0, kappa, alpha, h0):
+    def __init__(self, N, network_type, T0, kappa, alpha, h0,rng = None):
         """
         N: Number of Agents
         T: Initial Temperature (Uncertainty)
@@ -51,6 +52,8 @@ class FinancialIsingModel:
         self.h_trend = 0.0 # sensitivity of external field to recent returns
         self.use_leverage = False
         self.lev_frac     = 0.1
+        self.rng = rng if rng is not None else np.random.default_rng()
+        self.sweeps_per_step = 1
 
         self.spins = None
         self.J = None
@@ -64,10 +67,11 @@ class FinancialIsingModel:
         self.T_hist   = []          # effective temperature history
         self.spin_hist= []          # periodic spin snapshots
         self.price_hist = []
+        self.m_hist = []
 
 
     def initialize_spins(self):
-        spins = np.random.choice([-1, 1], size=self.N)
+        spins = self.rng.choice([-1, 1], size=self.N)
         self.m_prev = 0
         return spins
 
@@ -89,7 +93,7 @@ class FinancialIsingModel:
         # Coupling matrix: J[i,j] for connected pairs
         self.J = np.zeros((self.N, self.N))
         for i, j in G.edges:
-            w = np.random.uniform(0.01, 0.05)   # or from empirical data
+            w = self.rng.uniform(0.01, 0.05)   # or from empirical data
             self.J[i, j] = w
             self.J[j, i] = w                   # symmetric (undirected network)
 
@@ -135,7 +139,7 @@ class FinancialIsingModel:
         delta_energy: change in energy from proposed spin flip
         (i): coordinate of the spin to be flipped
         """
-        i = np.random.randint(0,self.N)
+        i = self.rng.integers(self.N)
 
         nbrs = self.get_neighbors(i)
         neighbor_field = np.sum(self.J[i, nbrs] * self.spins[nbrs])
@@ -155,7 +159,7 @@ class FinancialIsingModel:
         if delta_energy <= 0:
             self.spins[(i)] = -self.spins[(i)]
 
-        elif self.flip_probability(delta_energy) > np.random.rand():
+        elif self.flip_probability(delta_energy) > self.rng.random():
             self.spins[(i)] = -self.spins[(i)]
         
     def market_sentiment(self):
@@ -174,6 +178,7 @@ class FinancialIsingModel:
         self.price *= np.exp(r)
         self.price_hist.append(self.price)
         self.ret_hist.append(r)
+        self.m_hist.append(m)
         # self.m_prev = m
         return r
         
@@ -208,7 +213,7 @@ class FinancialIsingModel:
         if self.ret_hist[-1] < -threshold:
             long_agents = np.where(self.spins == 1)[0]
             n_forced    = int(self.lev_frac * len(long_agents))
-            forced      = np.random.choice(long_agents, n_forced, replace=False)
+            forced      = self.rng.choice(long_agents, n_forced, replace=False)
             self.spins[forced] = -1              # forced sell
 
     def magnetic_susceptibility(self, avg_mag, avg_mag_squared):
@@ -227,10 +232,11 @@ class FinancialIsingModel:
     
     def run_sweep(self, record_spins=False):
         # N single-agent update attempts = one Monte Carlo sweep
-        for _ in range(self.N):
-            delta_E, i = self.glauber_energy()
-            if delta_E <= 0 or np.random.rand() < np.exp(-delta_E / self.T):
-                self.spins[i] = -self.spins[i]
+        for _ in range(self.sweeps_per_step):
+            for _ in range(self.N):
+                delta_E, i = self.glauber_energy()
+                if delta_E <= 0 or self.rng.random() < np.exp(-delta_E / self.T):
+                    self.spins[i] = -self.spins[i]
 
         # Financial updates run once per sweep (not per flip)
         r = self.compute_return()
@@ -307,9 +313,12 @@ def plot_return_distributions(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
             model.run_sweep()
 
         # Reset histories so burn-in returns don't contaminate the sample
-        model.ret_hist  = []
-        model.vol_hist  = []
-        model.T_hist    = []
+        model.ret_hist   = []
+        model.vol_hist   = []
+        model.T_hist     = []
+        model.price      = 100.0
+        model.price_hist = []
+        model.m_hist     = []
         # model.sigma0    = None   # re-initialise baseline vol on clean data
 
         for _ in range(n_sweeps):
@@ -370,9 +379,12 @@ def plot_volatility_clustering(N=50, T0=1.0, kappa=0.2, n_sweeps=5000,
         for _ in range(500):          # burn-in
             model.run_sweep()
 
-        model.ret_hist = []
-        model.vol_hist = []
-        model.T_hist   = []
+        model.ret_hist   = []
+        model.vol_hist   = []
+        model.T_hist     = []
+        model.price_hist = []
+        model.price      = 100.0
+        model.m_hist     = []  
 
         for _ in range(n_sweeps):
             model.run_sweep()
@@ -421,10 +433,13 @@ def plot_susceptibility_vs_returns(N=50, T0=1.0, kappa=0.2,
     for _ in range(500):
         model.run_sweep()
 
-    model.ret_hist  = []
-    model.vol_hist  = []
-    model.T_hist    = []
-    model.spin_hist = []
+    model.ret_hist   = []
+    model.vol_hist   = []
+    model.T_hist     = []
+    model.spin_hist  = []
+    model.price_hist = []
+    model.price      = 100.0
+    model.h_hist     = []
 
     # record_spins=True every sweep — needed for rolling_susceptibility
     for _ in range(n_sweeps):
