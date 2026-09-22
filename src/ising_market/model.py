@@ -593,6 +593,64 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
         'sigma_empirical': sigma_empirical,
     }
 
+def compute_run_stats(m, window):
+    """
+    compute RMS magnetisation, fourth moment, order parameter, ACF - autocorrelation, integrated correlation time, thinning interval
+    zero-mean test, lag-1 autocorrelation of the thinned returns, mean sliding window volatility,
+    """
+    sokal_constant = 6
+    m_c = m - np.mean(m) # mean centred m
+    sigma_m = np.sqrt(np.mean(m**2))
+    R = np.mean(m**4)/(np.mean(m**2)**2) # Binder cumulant, essentially the kurtosis of the magnetisation distribution
+    q = abs(np.mean(m))/sigma_m # order parameter, essentially the mean magnetisation normalised by the RMS magnetisation
+    acf = np.correlate(m_c,m_c,mode='full')[len(m_c)-1:] / np.correlate(m_c,m_c,mode='full')[len(m_c)-1]
+    max_lag = min(len(acf)-1,len(m)//50)
+
+    tau_int = 0
+    converged = False
+
+    for W in range(1,max_lag):
+        tau_int = 0.5 + acf[1:W+1].sum()
+        if W >= sokal_constant * tau_int:
+            converged = True
+            break
+
+    threshold = 0.1
+    below = acf[1:] < threshold
+    if below.any():
+        k_star = np.argmax(below) + 1
+    else:
+        k_star = None
+
+    z = abs(np.mean(m))/(np.std(m)*np.sqrt(2*tau_int/len(m))) # zero-mean test statistic
+    if k_star is not None:
+        r = m[::k_star]
+        r_c = r - np.mean(r)
+        acf_r = np.correlate(r_c,r_c,mode='full')[len(r_c)-1:]/np.correlate(r_c,r_c,mode='full')[len(r_c)-1]
+        if len(r) >= window:
+            s = np.lib.stride_tricks.sliding_window_view(r,window).std(axis=1).mean()
+        else:
+            s = None
+    else:
+        r = None
+        acf_r = None
+        s = None
+
+    return {
+    'sigma_m': sigma_m,
+    'R': R,
+    'q': q,
+    'mean_m': np.mean(m),
+    'acf': acf,
+    'tau_int': tau_int,
+    'converged': converged,
+    'k_star': k_star,
+    'z': z,
+    'r': r,
+    'acf_r': acf_r,
+    's': s,
+    }
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
