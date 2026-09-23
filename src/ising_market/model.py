@@ -543,56 +543,6 @@ def _run_pilot(J,T0,rng,start,n_burn,n_pilot):
         model.run_sweep()
     return np.array(model.m_hist)
 
-def calibrate_parameters(rets, J_empirical, target_vol=0.01,
-                          T0_search=None, n_pilot=10000, n_seeds=8,
-                          n_burn=2000,seed=42,window=20):
-    """
-    Derives kappa and T0 from real return data.
-
-    target_vol: daily vol to match (S&P500 ≈ 0.01 per day)
-    T0_search:  list of T0 values to scan; auto-set if None
-    n_pilot:    sweeps per pilot run
-
-    Returns dict with calibrated kappa, T0, sigma0, and diagnostics.
-    """
-    N = J_empirical.shape[0]
-
-    # --- Step 1: measure empirical baseline vol ---
-    sigma_empirical = rets.std().mean()   # mean daily vol across tickers
-    print(f"\nEmpirical mean daily vol: {sigma_empirical:.4f}")
-    print(f"Target vol:               {target_vol:.4f}")
-
-    # --- Step 2: scan T0 to find disordered regime ---
-    # At alpha=0, kurtosis should be close to 3 (Gaussian)
-    # Too low T0 → kurtosis >> 3 even at alpha=0 (system ordered)
-    # Too high T0 → all dynamics wash out
-
-    lam = np.linalg.eigvalsh(J_empirical).max() # mean-field crossover estimate
-    if T0_search is None:
-        T0_search = np.geomspace(0.3 * lam, 1.3 * lam, 17)
-    print(f"lambda_max(J) = {lam:.4f}")
-    print(f"Scanning T0 in {T0_search.round(4)}")
-
-    kurtosis_by_T0 = {}
-    m_std_by_T0    = {}
-
-    runs = []
-    for i_T0,T0 in enumerate(T0_search):
-        for seed_id in range(n_seeds):
-            for start in ['random','up']:
-                run_rng = np.random.default_rng([seed, i_T0, seed_id, 0 if start == 'random' else 1])
-                m = _run_pilot(J_empirical, T0, run_rng, start, n_burn, n_pilot)
-                runs.append({'T0': T0, 'i_T0': i_T0, 'seed_id': seed_id, 'start': start, 'm': m})
-
-    print(f"\n{len(runs)} pilot runs completed.")
-
-    return {
-        'runs':            runs,
-        'T0_search':       T0_search,
-        'lam':             lam,
-        'sigma_empirical': sigma_empirical,
-    }
-
 def compute_run_stats(m, window):
     """
     compute RMS magnetisation, fourth moment, order parameter, ACF - autocorrelation, integrated correlation time, thinning interval
@@ -649,6 +599,60 @@ def compute_run_stats(m, window):
     'r': r,
     'acf_r': acf_r,
     's': s,
+    }
+
+def mean_se(values):
+    values = np.asarray(values)
+    return values.mean(), values.std(ddof=1)/np.sqrt(len(values))
+
+def calibrate_parameters(rets, J_empirical, target_vol=0.01,
+                          T0_search=None, n_pilot=10000, n_seeds=8,
+                          n_burn=2000,seed=42,window=20):
+    """
+    Derives kappa and T0 from real return data.
+
+    target_vol: daily vol to match (S&P500 ≈ 0.01 per day)
+    T0_search:  list of T0 values to scan; auto-set if None
+    n_pilot:    sweeps per pilot run
+
+    Returns dict with calibrated kappa, T0, sigma0, and diagnostics.
+    """
+    N = J_empirical.shape[0]
+
+    # --- Step 1: measure empirical baseline vol ---
+    sigma_empirical = rets.std().mean()   # mean daily vol across tickers
+    print(f"\nEmpirical mean daily vol: {sigma_empirical:.4f}")
+    print(f"Target vol:               {target_vol:.4f}")
+
+    # --- Step 2: scan T0 to find disordered regime ---
+    # At alpha=0, kurtosis should be close to 3 (Gaussian)
+    # Too low T0 → kurtosis >> 3 even at alpha=0 (system ordered)
+    # Too high T0 → all dynamics wash out
+
+    lam = np.linalg.eigvalsh(J_empirical).max() # mean-field crossover estimate
+    if T0_search is None:
+        T0_search = np.geomspace(0.3 * lam, 1.3 * lam, 17)
+    print(f"lambda_max(J) = {lam:.4f}")
+    print(f"Scanning T0 in {T0_search.round(4)}")
+
+    kurtosis_by_T0 = {}
+    m_std_by_T0    = {}
+
+    runs = []
+    for i_T0,T0 in enumerate(T0_search):
+        for seed_id in range(n_seeds):
+            for start in ['random','up']:
+                run_rng = np.random.default_rng([seed, i_T0, seed_id, 0 if start == 'random' else 1])
+                m = _run_pilot(J_empirical, T0, run_rng, start, n_burn, n_pilot)
+                runs.append({'T0': T0, 'i_T0': i_T0, 'seed_id': seed_id, 'start': start, 'm': m})
+
+    print(f"\n{len(runs)} pilot runs completed.")
+
+    return {
+        'runs':            runs,
+        'T0_search':       T0_search,
+        'lam':             lam,
+        'sigma_empirical': sigma_empirical,
     }
 
 
