@@ -14,6 +14,7 @@ import networkx as nx
 from scipy import stats
 import yfinance as yf
 import os
+import pandas as pd
 
 FIGURES_DIR= "results/figures"
 os.makedirs(FIGURES_DIR,exist_ok=True)
@@ -604,6 +605,107 @@ def compute_run_stats(m, window):
 def mean_se(values):
     values = np.asarray(values)
     return values.mean(), values.std(ddof=1)/np.sqrt(len(values))
+
+def aggregate_by_T0(runs, n_pilot, n_seeds, window):
+    """
+    Collapses runs lists into one summary row per T0: equilibration check, pooled sigma_m/R/q/s, n_eff, epsilon.
+    """
+    from collections import defaultdict
+
+    # group by T0
+    by_T0 = defaultdict(list)
+    for run in runs:
+        by_T0[run['i_T0']].append(run)
+
+    rows = []
+
+    for i_T0 in sorted(by_T0):
+        group = by_T0[i_T0]
+        T0 = group[0]['T0']
+
+        # split by start
+        random_runs = [r for r in group if r['start']=='random']
+        up_runs = [r for r in group if r['start']=='up']
+
+        # equilibriation check
+        equilibriated = True
+        for key in ("sigma_m", 'R'):
+            m_r, se_r = mean_se([r[key] for r in random_runs])
+            m_u, se_u = mean_se([r[key] for r in up_runs])
+            if abs(m_r - m_u) > 2 * np.sqrt(se_r**2 + se_u**2):
+                equilibrated = False
+
+        s_random = [r['s'] for r in random_runs if r['s'] is not None]
+        s_up = [r['s'] for r in up_runs if r['s'] is not None]
+        if len(s_random) >= 2 and len(s_up) >= 2:
+            m_r, se_r = mean_se(s_random)
+            m_u, se_u = mean_se(s_up)
+            if abs(m_r - m_u) > 2 * np.sqrt(se_r**2 + se_u**2):
+                equilibrated = False
+
+        pooled = random_runs + up_runs
+        sigma_m_mean,sigma_m_se = mean_se([r['sigma_m'] for r in pooled])
+        R_mean, R_se             = mean_se([r['R'] for r in pooled])
+        q_mean, q_se             = mean_se([r['q'] for r in pooled])
+
+        s_vals = [r['s'] for r in pooled if r['s'] is not None]
+        n_s_valid = len(s_vals)
+        if n_s_valid >= 2:
+            s_mean, s_se = mean_se(s_vals)
+        elif n_s_valid == 1:
+            s_mean, s_se = s_vals[0], np.nan
+        else:
+            s_mean, s_se = np.nan, np.nan
+
+        n_eff = sum(n_pilot / (2 * r['tau_int']) for r in pooled if r['tau_int'] > 0)
+
+        frac_converged = np.mean([r['converged'] for r in pooled])
+
+        rows.append({
+            'i_T0': i_T0, 'T0': T0, 'equilibrated': equilibrated,
+            'sigma_m_mean': sigma_m_mean, 'sigma_m_se': sigma_m_se,
+            'R_mean': R_mean, 'R_se': R_se,
+            'q_mean': q_mean, 'q_se': q_se,
+            's_mean': s_mean, 's_se': s_se, 'n_s_valid': n_s_valid,
+            'n_eff': n_eff, 'frac_converged': frac_converged,
+        })
+
+        T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
+
+    eps_by_T0 = defaultdict(list)
+    for seed_id in range(n_seeds):
+        ln_T0, ln_s, i_T0_list = [], [], []
+        for i_T0 in sorted(by_T0):
+            match = [r for r in by_T0[i_T0]
+                     if r['start'] == 'random' and r['seed_id'] == seed_id]
+            if not match:
+                continue
+            run = match[0]
+            if run['s'] is not None and run['s'] > 0:
+                ln_T0.append(np.log(run['T0']))
+                ln_s.append(np.log(run['s']))
+                i_T0_list.append(i_T0)
+        if len(ln_T0) >= 3:
+            eps_vals = np.gradient(ln_s, ln_T0)
+            for i_T0, e in zip(i_T0_list, eps_vals):
+                eps_by_T0[i_T0].append(e)
+
+    eps_mean_col, eps_se_col = [], []
+    for i_T0 in T0_table['i_T0']:
+        vals = eps_by_T0.get(i_T0, [])
+        if len(vals) >= 2:
+            m_, se_ = mean_se(vals)
+        elif len(vals) == 1:
+            m_, se_ = vals[0], np.nan
+        else:
+            m_, se_ = np.nan, np.nan
+        eps_mean_col.append(m_)
+        eps_se_col.append(se_)
+
+    T0_table['eps_mean'] = eps_mean_col
+    T0_table['eps_se']   = eps_se_col
+
+    return T0_table
 
 def calibrate_parameters(rets, J_empirical, target_vol=0.01,
                           T0_search=None, n_pilot=10000, n_seeds=8,
