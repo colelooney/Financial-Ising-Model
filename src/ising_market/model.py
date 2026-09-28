@@ -628,7 +628,7 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
         up_runs = [r for r in group if r['start']=='up']
 
         # equilibriation check
-        equilibriated = True
+        equilibrated = True
         for key in ("sigma_m", 'R'):
             m_r, se_r = mean_se([r[key] for r in random_runs])
             m_u, se_u = mean_se([r[key] for r in up_runs])
@@ -660,6 +660,13 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
         n_eff = sum(n_pilot / (2 * r['tau_int']) for r in pooled if r['tau_int'] > 0)
 
         frac_converged = np.mean([r['converged'] for r in pooled])
+        frac_z_high = np.mean([not (r['z'] <= 3) for r in pooled ])
+        mean_abs_ac_r1 = np.mean([abs(r['acf_r'][1]) for r in pooled if r['acf_r'] is not None and len(r['acf_r']) >= 2])
+        k_star_list = [r['k_star'] for r in pooled if r['k_star'] is not None]
+        if k_star_list is not []:
+            k_star_p75 = int(np.ceil(np.percentile(k_star_list,75)))
+        else:
+            k_star_p75 = np.nan
 
         rows.append({
             'i_T0': i_T0, 'T0': T0, 'equilibrated': equilibrated,
@@ -668,6 +675,8 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
             'q_mean': q_mean, 'q_se': q_se,
             's_mean': s_mean, 's_se': s_se, 'n_s_valid': n_s_valid,
             'n_eff': n_eff, 'frac_converged': frac_converged,
+            'frac_z_high':frac_z_high, 'mean_abs_ac_r1':mean_abs_ac_r1,
+            'k_star_p75':k_star_p75,
         })
 
         T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
