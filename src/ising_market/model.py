@@ -663,7 +663,7 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
         frac_z_high = np.mean([not (r['z'] <= 3) for r in pooled ])
         mean_abs_ac_r1 = np.mean([abs(r['acf_r'][1]) for r in pooled if r['acf_r'] is not None and len(r['acf_r']) >= 2])
         k_star_list = [r['k_star'] for r in pooled if r['k_star'] is not None]
-        if k_star_list is not []:
+        if k_star_list:
             k_star_p75 = int(np.ceil(np.percentile(k_star_list,75)))
         else:
             k_star_p75 = np.nan
@@ -676,7 +676,7 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
             's_mean': s_mean, 's_se': s_se, 'n_s_valid': n_s_valid,
             'n_eff': n_eff, 'frac_converged': frac_converged,
             'frac_z_high':frac_z_high, 'mean_abs_ac_r1':mean_abs_ac_r1,
-            'k_star_p75':k_star_p75,
+            'k_star_p75':k_star_p75,'n_runs': len(pooled),
         })
 
         T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
@@ -715,6 +715,73 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
     T0_table['eps_se']   = eps_se_col
 
     return T0_table
+
+def select_T0(T0_table,
+              max_frac_z_high=0.10, min_frac_converged=0.75, min_frac_s_valid=0.75,
+              max_mean_abs_ac_r1=0.10, min_n_eff_per_run=50, eps_sigma=2.0,
+              verbose=True):
+    required = {'i_T0', 'T0', 'equilibrated', 'frac_converged', 'n_s_valid', 'n_eff',
+            'mean_abs_ac_r1', 'frac_z_high', 'eps_mean', 'eps_se', 'k_star_p75', 'n_runs'}
+    missing = required - set(T0_table.columns)
+    if missing:
+        raise KeyError(f"T0_table is missing columns: {missing}")
+
+    n_runs = T0_table.n_runs
+    frac_s_valid = T0_table.n_s_valid/n_runs
+    n_eff_per_run = T0_table.n_eff/n_runs
+    eps_lcb = T0_table.eps_mean - eps_sigma * T0_table.eps_se
+
+    criteria = pd.DataFrame({
+        'equilibrated':T0_table.equilibrated,
+        'converged': T0_table.frac_converged >= min_frac_converged,
+        's_valid': frac_s_valid >= min_frac_s_valid,
+        'n_eff': n_eff_per_run >= min_n_eff_per_run,
+        'thinning': T0_table.mean_abs_ac_r1 <= max_mean_abs_ac_r1,
+        'zero_mean': T0_table.frac_z_high <= max_frac_z_high,
+        'eps_defined': np.isfinite(T0_table.eps_mean) & np.isfinite(T0_table.eps_se),
+        'eps_positive': eps_lcb > 0,
+    }, index = T0_table.index)
+
+    survivors = criteria.all(axis=1)
+    first_failure = (~criteria).idxmax(axis=1)
+    first_failure[survivors] = 'none'
+
+    if not survivors.any():
+        winner_idx = None
+        winner_row = None
+        k = None
+        T0_winner = None
+    else:
+        winner_idx = eps_lcb.where(survivors).idxmax()
+        winner_row = T0_table.loc[winner_idx]
+        assert not np.isnan(winner_row.k_star_p75), "survivor row has undefined k_star_p75 — check s_valid criterion"
+        k = int(winner_row.k_star_p75)
+        T0_winner = winner_row.T0
+        i_T0_winner = int(winner_row.i_T0)
+
+    if verbose:
+        report = pd.DataFrame({
+            'T0': T0_table.T0,
+            'survivor': survivors,
+            'first_failure': first_failure,
+            'eps_lcb': eps_lcb,
+        })
+        print(report.to_string(index=False))
+        if winner_idx is not None:
+            print(f"\nSelected T0={T0_winner:.4f} (i_T0={winner_row.i_T0}), "
+                  f"k={k}, eps_lcb={eps_lcb[winner_idx]:.3f}")
+        else:
+            print("\nNo T0 satisfies all criteria.")
+
+    result = {
+        'T0': T0_winner,
+        'i_T0': i_T0_winner if winner_idx is not None else None,
+        'k': k,
+        'row': winner_row,
+        'criteria': criteria,
+    }
+
+    return result
 
 def calibrate_parameters(rets, J_empirical, target_vol=0.01,
                           T0_search=None, n_pilot=10000, n_seeds=8,
