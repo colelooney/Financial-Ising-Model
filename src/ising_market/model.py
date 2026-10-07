@@ -550,6 +550,14 @@ def _run_pilot(J,T0,rng,start,n_burn,n_pilot):
         model.run_sweep()
     return np.array(model.m_hist)
 
+def _acf(x):
+    """Normalised autocorrelation of an already mean-centred series, lags 0..n-1.
+    FFT version of np.correlate(x, x, 'full')[n-1:] / sum(x**2): O(n log n) instead of O(n^2)."""
+    n = len(x)
+    f = np.fft.rfft(x, 2 * n)
+    r = np.fft.irfft(f * np.conj(f), 2 * n)[:n]
+    return r / r[0]
+
 def compute_run_stats(m, window):
     """
     compute RMS magnetisation, fourth moment, order parameter, ACF - autocorrelation, integrated correlation time, thinning interval
@@ -560,7 +568,7 @@ def compute_run_stats(m, window):
     sigma_m = np.sqrt(np.mean(m**2))
     R = np.mean(m**4)/(np.mean(m**2)**2) # Binder cumulant, essentially the kurtosis of the magnetisation distribution
     q = abs(np.mean(m))/sigma_m # order parameter, essentially the mean magnetisation normalised by the RMS magnetisation
-    acf = np.correlate(m_c,m_c,mode='full')[len(m_c)-1:] / np.correlate(m_c,m_c,mode='full')[len(m_c)-1]
+    acf = _acf(m_c)
     max_lag = min(len(acf)-1,len(m)//50)
 
     tau_int = 0
@@ -583,7 +591,7 @@ def compute_run_stats(m, window):
     if k_star is not None:
         r = m[::k_star]
         r_c = r - np.mean(r)
-        acf_r = np.correlate(r_c,r_c,mode='full')[len(r_c)-1:]/np.correlate(r_c,r_c,mode='full')[len(r_c)-1]
+        acf_r = _acf(r_c)
         if len(r) >= window:
             s = np.lib.stride_tricks.sliding_window_view(r,window).std(axis=1).mean()
         else:
