@@ -16,4 +16,4 @@ __pycache__/
 data/
 results/
 patches/
-tests/
+tests/ising_handover/
