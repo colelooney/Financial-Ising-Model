@@ -578,6 +578,11 @@ def _acf(x):
 
 THIN_C = 3.0   # thinning interval k = ceil(THIN_C * p75 of tau_int over a row's converged runs)
 
+# run-quality thresholds, shared by aggregate_by_T0 (which rows may feed eps) and select_T0
+MIN_FRAC_CONVERGED = 0.75
+MAX_FRAC_Z_HIGH    = 0.10
+MIN_N_EFF_PER_RUN  = 50
+
 def thinned_stats(m, k, window):
     """Lag-1 autocorrelation and mean rolling std (over `window` samples) of m sampled every k sweeps."""
     x = m[::k]
@@ -627,9 +632,10 @@ def mean_se(values):
     values = np.asarray(values)
     return values.mean(), values.std(ddof=1)/np.sqrt(len(values))
 
-def aggregate_by_T0(runs, n_pilot, n_seeds, window):
+def aggregate_by_T0(runs, n_pilot, window):
     """
-    Collapses runs lists into one summary row per T0: equilibration check, pooled sigma_m/R/q/s, n_eff, epsilon.
+    Collapses runs lists into one summary row per T0: equilibration check, pooled sigma_m/R/q/s, n_eff,
+    thinning interval k, thinned lag-1 AC, and epsilon = d ln s / d ln T0 measured at that row's k.
     """
     from collections import defaultdict
 
@@ -708,44 +714,46 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
 
     T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
 
-    eps_by_T0 = defaultdict(list)
-    for seed_id in range(n_seeds):
-        ln_T0, ln_s, i_T0_list = [], [], []
-        for i_T0 in sorted(by_T0):
-            match = [r for r in by_T0[i_T0]
-                     if r['start'] == 'random' and r['seed_id'] == seed_id]
-            if not match:
-                continue
-            run = match[0]
-            if np.isfinite(run['s_k']) and run['s_k'] > 0:
-                ln_T0.append(np.log(run['T0']))
-                ln_s.append(np.log(run['s_k']))
-                i_T0_list.append(i_T0)
-        if len(ln_T0) >= 3:
-            eps_vals = np.gradient(ln_s, ln_T0)
-            for i_T0, e in zip(i_T0_list, eps_vals):
-                eps_by_T0[i_T0].append(e)
+    # rows whose runs can be trusted to feed eps (thinning and eps itself are not required here)
+    T0_table['valid_run'] = (T0_table.equilibrated
+                             & (T0_table.frac_converged >= MIN_FRAC_CONVERGED)
+                             & (T0_table.frac_z_high <= MAX_FRAC_Z_HIGH)
+                             & (T0_table.n_eff / T0_table.n_runs >= MIN_N_EFF_PER_RUN))
 
-    eps_mean_col, eps_se_col = [], []
-    for i_T0 in T0_table['i_T0']:
-        vals = eps_by_T0.get(i_T0, [])
-        if len(vals) >= 2:
-            m_, se_ = mean_se(vals)
-        elif len(vals) == 1:
-            m_, se_ = vals[0], np.nan
-        else:
-            m_, se_ = np.nan, np.nan
-        eps_mean_col.append(m_)
-        eps_se_col.append(se_)
+    # eps at each row's own k: OLS of per-run ln s_k on ln T0 over the row and its valid neighbours.
+    # (np.gradient's central difference ignored the row's own s and used invalid neighbours at other k.)
+    ln_T0 = np.log(T0_table.T0.values)
+    groups = [by_T0[i] for i in T0_table.i_T0]
+    eps_mean_col, eps_se_col, eps_rows_col = [], [], []
+    for p in range(len(T0_table)):
+        k = T0_table.k[p]
+        use = [q for q in (p - 1, p, p + 1) if 0 <= q < len(T0_table) and T0_table.valid_run[q]]
+        if not (T0_table.valid_run[p] and np.isfinite(k) and len(use) >= 2):
+            eps_mean_col.append(np.nan); eps_se_col.append(np.nan); eps_rows_col.append('')
+            continue
+        x, y = [], []
+        for q in use:
+            for r in groups[q]:
+                _, s = thinned_stats(r['m'], int(k), window)
+                if np.isfinite(s) and s > 0:
+                    x.append(ln_T0[q]); y.append(np.log(s))
+        x, y = np.array(x), np.array(y)
+        X = np.column_stack([np.ones_like(x), x])
+        beta = np.linalg.lstsq(X, y, rcond=None)[0]
+        resid = y - X @ beta
+        cov = (resid @ resid / (len(y) - 2)) * np.linalg.inv(X.T @ X)
+        eps_mean_col.append(beta[1]); eps_se_col.append(np.sqrt(cov[1, 1]))
+        eps_rows_col.append(','.join(str(int(T0_table.i_T0[q])) for q in use))
 
     T0_table['eps_mean'] = eps_mean_col
     T0_table['eps_se']   = eps_se_col
+    T0_table['eps_rows'] = eps_rows_col
 
     return T0_table
 
 def select_T0(T0_table,
-              max_frac_z_high=0.10, min_frac_converged=0.75, min_frac_s_valid=0.75,
-              max_ac1=0.10, ac1_sigma=2.0, min_n_eff_per_run=50, eps_sigma=2.0,
+              max_frac_z_high=MAX_FRAC_Z_HIGH, min_frac_converged=MIN_FRAC_CONVERGED, min_frac_s_valid=0.75,
+              max_ac1=0.10, ac1_sigma=2.0, min_n_eff_per_run=MIN_N_EFF_PER_RUN, eps_sigma=2.0,
               verbose=True):
     required = {'i_T0', 'T0', 'equilibrated', 'frac_converged', 'n_s_valid', 'n_eff',
             'ac1_mean', 'ac1_se', 'frac_z_high', 'eps_mean', 'eps_se', 'k', 'n_runs'}
@@ -856,7 +864,7 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
     for run in runs:
         run.update(compute_run_stats(run['m']))
 
-    T0_table = aggregate_by_T0(runs, n_pilot, n_seeds, window)
+    T0_table = aggregate_by_T0(runs, n_pilot, window)
     selection = select_T0(T0_table)
 
     return {
