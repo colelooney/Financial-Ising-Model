@@ -889,6 +889,85 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
     }   
 
 
+@njit(cache=True)
+def _deploy_kernel(J, T0, k, alpha, sigma0, spins, n_days, n_burn, seed, window, T_lo, T_hi):
+    """Compiled deployed model (h = 0, no leverage): k Metropolis sweeps per day, then the flipped,
+    centred feedback T = T0*(sigma/sigma0)**(-alpha) with sigma = std of the last `window` daily m.
+    Returns daily m, daily T, and how many recorded days T was clipped to [T_lo, T_hi]."""
+    np.random.seed(seed)
+    s = spins.copy()
+    N = s.shape[0]
+    m_out = np.empty(n_days)
+    T_out = np.empty(n_days)
+    clip = 0
+    buf = np.zeros(window)
+    T = T0
+    for d in range(n_burn + n_days):
+        for _ in range(k * N):
+            i = np.random.randint(N)
+            f = 0.0
+            for j in range(N):
+                f += J[i, j] * s[j]
+            dE = 2.0 * s[i] * f
+            if dE <= 0.0 or np.random.random() < np.exp(-dE / T):
+                s[i] = -s[i]
+        m = s.sum() / N
+        buf[d % window] = m
+        c = 0
+        if d >= window - 1:
+            sig = buf.std()
+            if sig > 0.0:
+                T = T0 * (sig / sigma0) ** (-alpha)
+            if T < T_lo:
+                T = T_lo; c = 1
+            elif T > T_hi:
+                T = T_hi; c = 1
+        if d >= n_burn:
+            m_out[d - n_burn] = m
+            T_out[d - n_burn] = T
+            clip += c
+    return m_out, T_out, clip
+
+def simulate_deployed(J, T0, k, alpha, sigma0, n_days, n_burn=500, rng=None, kappa=1.0, window=20, T_clip=(0.05, 20.0)):
+    """
+    Run the calibrated model for n_days days of k sweeps with the flipped, centred feedback.
+    Same dynamics as FinancialIsingModel with sweeps_per_step = k, h = 0, use_leverage = False, compiled.
+    sigma0: baseline rolling std of m at k (calibrate_parameters()['sigma0']).
+    Returns r = kappa*m per day, m, T per day, and the fraction of days T hit the clip (should be 0).
+    """
+    rng = rng if rng is not None else np.random.default_rng()
+    N = J.shape[0]
+    spins = rng.choice([-1.0, 1.0], size=N)
+    seed = int(rng.integers(2**31 - 1))
+    m, T, clip = _deploy_kernel(np.ascontiguousarray(J, dtype=np.float64), float(T0), int(k), float(alpha),
+                                float(sigma0), spins, int(n_days), int(n_burn), seed, int(window),
+                                T_clip[0] * T0, T_clip[1] * T0)
+    return {'r': kappa * m, 'm': m, 'T': T, 'clip_frac': clip / n_days}
+
+def stylised_facts(r, max_lag=20):
+    """
+    Return-level stylised facts. Targets for daily equity returns: kurtosis 5-20 (3 = Gaussian),
+    Student-t dof 3-5, AC(r) ~ 0 at all lags, AC(|r|) positive and slowly decaying.
+    """
+    r = np.asarray(r)
+    a = np.abs(r - r.mean())
+
+    def ac(x, L):
+        xc = x - x.mean()
+        return float(xc[:-L] @ xc[L:] / (xc @ xc))
+
+    return {
+        'kurtosis':    stats.kurtosis(r, fisher=False),
+        'jb_p':        stats.jarque_bera(r)[1],
+        't_dof':       stats.t.fit(r)[0],          # diverges (Gaussian limit) when kurtosis < 3
+        'ac_r1':       ac(r, 1),
+        'ac_r_mean':   np.mean([ac(r, L) for L in range(1, max_lag + 1)]),
+        'ac_abs1':     ac(a, 1),
+        'ac_abs_mean': np.mean([ac(a, L) for L in range(1, max_lag + 1)]),
+        'ac_abs_last': ac(a, max_lag),
+    }
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=
