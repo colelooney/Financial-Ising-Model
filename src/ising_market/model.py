@@ -15,6 +15,7 @@ from scipy import stats
 import yfinance as yf
 import os
 import pandas as pd
+from numba import njit
 
 FIGURES_DIR= "results/figures"
 os.makedirs(FIGURES_DIR,exist_ok=True)
@@ -533,22 +534,39 @@ def build_empirical_J(rets, threshold=0.3,normalize=True,verbose=True):
           f"threshold={threshold}")
     return J, C
 
+@njit(cache=True)
+def _metropolis_pilot(J, T, spins, n_burn, n_record, seed):
+    """Compiled pilot dynamics (alpha = 0, h = 0), identical to run_sweep:
+    N random-site Metropolis attempts per sweep; returns m after each recorded sweep."""
+    np.random.seed(seed)
+    s = spins.copy()
+    N = s.shape[0]
+    m = np.empty(n_record)
+    for t in range(n_burn + n_record):
+        for _ in range(N):
+            i = np.random.randint(N)
+            f = 0.0
+            for j in range(N):
+                f += J[i, j] * s[j]
+            dE = 2.0 * s[i] * f
+            if dE <= 0.0 or np.random.random() < np.exp(-dE / T):
+                s[i] = -s[i]
+        if t >= n_burn:
+            m[t - n_burn] = s.sum() / N
+    return m
+
 def _run_pilot(J,T0,rng,start,n_burn,n_pilot):
+    """alpha = 0, h = 0 pilot run: m after each of n_pilot sweeps (after n_burn burn-in sweeps).
+    Initial spins and the kernel seed both come from rng, so runs stay reproducible per (seed, i_T0, seed_id, start)."""
     N = J.shape[0]
-    model = FinancialIsingModel(N=N,network_type='empirical',T0=T0,
-                                kappa=1.0,alpha=0.0,h0=0.0,rng=rng)
-
-    model.track_price = False
-    model.spins = model.initialize_spins(start=start)
-    model.build_empirical_network(J)
-    for _ in range(n_burn):
-        model.run_sweep()
-
-    model.ret_hist = []
-    model.m_hist = []
-    for _ in range(n_pilot):
-        model.run_sweep()
-    return np.array(model.m_hist)
+    if start == 'random':
+        spins = rng.choice([-1.0, 1.0], size=N)
+    elif start == 'up':
+        spins = np.ones(N)
+    else:
+        raise ValueError(f"start must be 'random' or 'up', got {start!r}")
+    seed = int(rng.integers(2**31 - 1))
+    return _metropolis_pilot(np.ascontiguousarray(J, dtype=np.float64), float(T0), spins, n_burn, n_pilot, seed)
 
 def _acf(x):
     """Normalised autocorrelation of an already mean-centred series, lags 0..n-1.
