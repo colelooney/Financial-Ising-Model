@@ -809,7 +809,7 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
 
     lam = np.linalg.eigvalsh(J_empirical).max() # mean-field crossover estimate
     if T0_search is None:
-        T0_search = np.geomspace(0.3 * lam, 1.3 * lam, 17)
+        T0_search = np.geomspace(0.35*lam, 0.85*lam, 9)
     print(f"lambda_max(J) = {lam:.4f}")
     print(f"Scanning T0 in {T0_search.round(4)}")
 
@@ -826,12 +826,20 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
 
     print(f"\n{len(runs)} pilot runs completed.")
 
+    for run in runs:
+        run.update(compute_run_stats(run['m'], window))
+
+    T0_table = aggregate_by_T0(runs, n_pilot, n_seeds, window)
+    selection = select_T0(T0_table)
+
     return {
         'runs':            runs,
+        'T0_table':        T0_table,
+        'selection':       selection,
         'T0_search':       T0_search,
         'lam':             lam,
         'sigma_empirical': sigma_empirical,
-    }
+    }   
 
 
 if __name__ == "__main__":
@@ -903,3 +911,11 @@ if __name__ == "__main__":
         TICKERS, start='2005-01-01', end='2008-01-01'
     )
     N = len(valid_tickers)
+
+    J_emp, corr = build_empirical_J(rets)
+
+    lam = np.linalg.eigvalsh(J_emp).max() 
+
+    result = calibrate_parameters(rets, J_emp,n_pilot=50000,n_burn=10000)
+    assert 'T0_table' in result and 'selection' in result
+    print(result['T0_table'][['T0','equilibrated','frac_converged','eps_mean']])

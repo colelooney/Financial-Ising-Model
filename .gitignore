@@ -15,3 +15,5 @@ __pycache__/
 # Project outputs (regenerable)
 data/
 results/
+patches/
+tests/
