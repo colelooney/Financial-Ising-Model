@@ -576,10 +576,22 @@ def _acf(x):
     r = np.fft.irfft(f * np.conj(f), 2 * n)[:n]
     return r / r[0]
 
-def compute_run_stats(m, window):
+THIN_C = 3.0   # thinning interval k = ceil(THIN_C * p75 of tau_int over a row's converged runs)
+
+def thinned_stats(m, k, window):
+    """Lag-1 autocorrelation and mean rolling std (over `window` samples) of m sampled every k sweeps."""
+    x = m[::k]
+    xc = x - x.mean()
+    ac1 = float(xc[:-1] @ xc[1:] / (xc @ xc))
+    s = np.lib.stride_tricks.sliding_window_view(x, window).std(axis=1).mean() if len(x) >= window else np.nan
+    return ac1, s
+
+def compute_run_stats(m):
     """
-    compute RMS magnetisation, fourth moment, order parameter, ACF - autocorrelation, integrated correlation time, thinning interval
-    zero-mean test, lag-1 autocorrelation of the thinned returns, mean sliding window volatility,
+    Per-run statistics that do not depend on the thinning interval: RMS magnetisation, Binder ratio,
+    order parameter, ACF, integrated correlation time (Sokal window, c = 6), zero-mean test.
+    The thinning interval is chosen per T0 row in aggregate_by_T0, so s and the thinned
+    autocorrelation are computed there (thinned_stats).
     """
     sokal_constant = 6
     m_c = m - np.mean(m) # mean centred m
@@ -598,26 +610,7 @@ def compute_run_stats(m, window):
             converged = True
             break
 
-    threshold = 0.1
-    below = acf[1:] < threshold
-    if below.any():
-        k_star = np.argmax(below) + 1
-    else:
-        k_star = None
-
     z = abs(np.mean(m))/(np.std(m)*np.sqrt(2*tau_int/len(m))) # zero-mean test statistic
-    if k_star is not None:
-        r = m[::k_star]
-        r_c = r - np.mean(r)
-        acf_r = _acf(r_c)
-        if len(r) >= window:
-            s = np.lib.stride_tricks.sliding_window_view(r,window).std(axis=1).mean()
-        else:
-            s = None
-    else:
-        r = None
-        acf_r = None
-        s = None
 
     return {
     'sigma_m': sigma_m,
@@ -627,11 +620,7 @@ def compute_run_stats(m, window):
     'acf': acf,
     'tau_int': tau_int,
     'converged': converged,
-    'k_star': k_star,
     'z': z,
-    'r': r,
-    'acf_r': acf_r,
-    's': s,
     }
 
 def mean_se(values):
@@ -659,6 +648,12 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
         random_runs = [r for r in group if r['start']=='random']
         up_runs = [r for r in group if r['start']=='up']
 
+        # one thinning interval per row, from tau_int (not from the 0.1 threshold the test checks)
+        taus = [r['tau_int'] for r in group if r['converged']]
+        k = int(np.ceil(THIN_C * np.percentile(taus, 75))) if len(taus) >= 2 else np.nan
+        for r in group:
+            r['ac1_k'], r['s_k'] = thinned_stats(r['m'], k, window) if np.isfinite(k) else (np.nan, np.nan)
+
         # equilibriation check
         equilibrated = True
         for key in ("sigma_m", 'R'):
@@ -667,8 +662,8 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
             if abs(m_r - m_u) > 2 * np.sqrt(se_r**2 + se_u**2):
                 equilibrated = False
 
-        s_random = [r['s'] for r in random_runs if r['s'] is not None]
-        s_up = [r['s'] for r in up_runs if r['s'] is not None]
+        s_random = [r['s_k'] for r in random_runs if np.isfinite(r['s_k'])]
+        s_up = [r['s_k'] for r in up_runs if np.isfinite(r['s_k'])]
         if len(s_random) >= 2 and len(s_up) >= 2:
             m_r, se_r = mean_se(s_random)
             m_u, se_u = mean_se(s_up)
@@ -680,7 +675,7 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
         R_mean, R_se             = mean_se([r['R'] for r in pooled])
         q_mean, q_se             = mean_se([r['q'] for r in pooled])
 
-        s_vals = [r['s'] for r in pooled if r['s'] is not None]
+        s_vals = [r['s_k'] for r in pooled if np.isfinite(r['s_k'])]
         n_s_valid = len(s_vals)
         if n_s_valid >= 2:
             s_mean, s_se = mean_se(s_vals)
@@ -693,12 +688,12 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
 
         frac_converged = np.mean([r['converged'] for r in pooled])
         frac_z_high = np.mean([not (r['z'] <= 3) for r in pooled ])
-        mean_abs_ac_r1 = np.mean([abs(r['acf_r'][1]) for r in pooled if r['acf_r'] is not None and len(r['acf_r']) >= 2])
-        k_star_list = [r['k_star'] for r in pooled if r['k_star'] is not None]
-        if k_star_list:
-            k_star_p75 = int(np.ceil(np.percentile(k_star_list,75)))
+        # pooled SIGNED lag-1 autocorrelation at the row's k (mean of |.| has a noise floor)
+        ac1_vals = [r['ac1_k'] for r in pooled if np.isfinite(r['ac1_k'])]
+        if len(ac1_vals) >= 2:
+            ac1_mean, ac1_se = mean_se(ac1_vals)
         else:
-            k_star_p75 = np.nan
+            ac1_mean, ac1_se = np.nan, np.nan
 
         rows.append({
             'i_T0': i_T0, 'T0': T0, 'equilibrated': equilibrated,
@@ -707,8 +702,8 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
             'q_mean': q_mean, 'q_se': q_se,
             's_mean': s_mean, 's_se': s_se, 'n_s_valid': n_s_valid,
             'n_eff': n_eff, 'frac_converged': frac_converged,
-            'frac_z_high':frac_z_high, 'mean_abs_ac_r1':mean_abs_ac_r1,
-            'k_star_p75':k_star_p75,'n_runs': len(pooled),
+            'frac_z_high':frac_z_high, 'ac1_mean':ac1_mean, 'ac1_se':ac1_se,
+            'k':k,'n_runs': len(pooled),
         })
 
     T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
@@ -722,9 +717,9 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
             if not match:
                 continue
             run = match[0]
-            if run['s'] is not None and run['s'] > 0:
+            if np.isfinite(run['s_k']) and run['s_k'] > 0:
                 ln_T0.append(np.log(run['T0']))
-                ln_s.append(np.log(run['s']))
+                ln_s.append(np.log(run['s_k']))
                 i_T0_list.append(i_T0)
         if len(ln_T0) >= 3:
             eps_vals = np.gradient(ln_s, ln_T0)
@@ -750,10 +745,10 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
 
 def select_T0(T0_table,
               max_frac_z_high=0.10, min_frac_converged=0.75, min_frac_s_valid=0.75,
-              max_mean_abs_ac_r1=0.10, min_n_eff_per_run=50, eps_sigma=2.0,
+              max_ac1=0.10, ac1_sigma=2.0, min_n_eff_per_run=50, eps_sigma=2.0,
               verbose=True):
     required = {'i_T0', 'T0', 'equilibrated', 'frac_converged', 'n_s_valid', 'n_eff',
-            'mean_abs_ac_r1', 'frac_z_high', 'eps_mean', 'eps_se', 'k_star_p75', 'n_runs'}
+            'ac1_mean', 'ac1_se', 'frac_z_high', 'eps_mean', 'eps_se', 'k', 'n_runs'}
     missing = required - set(T0_table.columns)
     if missing:
         raise KeyError(f"T0_table is missing columns: {missing}")
@@ -768,7 +763,7 @@ def select_T0(T0_table,
         'converged': T0_table.frac_converged >= min_frac_converged,
         's_valid': frac_s_valid >= min_frac_s_valid,
         'n_eff': n_eff_per_run >= min_n_eff_per_run,
-        'thinning': T0_table.mean_abs_ac_r1 <= max_mean_abs_ac_r1,
+        'thinning': (T0_table.ac1_mean.abs() + ac1_sigma * T0_table.ac1_se) <= max_ac1,
         'zero_mean': T0_table.frac_z_high <= max_frac_z_high,
         'eps_defined': np.isfinite(T0_table.eps_mean) & np.isfinite(T0_table.eps_se),
         'eps_positive': eps_lcb > 0,
@@ -786,8 +781,8 @@ def select_T0(T0_table,
     else:
         winner_idx = eps_lcb.where(survivors).idxmax()
         winner_row = T0_table.loc[winner_idx]
-        assert not np.isnan(winner_row.k_star_p75), "survivor row has undefined k_star_p75 — check s_valid criterion"
-        k = int(winner_row.k_star_p75)
+        assert np.isfinite(winner_row.k), "survivor row has undefined k — check converged criterion"
+        k = int(winner_row.k)
         T0_winner = winner_row.T0
         i_T0_winner = int(winner_row.i_T0)
 
@@ -859,7 +854,7 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
     print(f"\n{len(runs)} pilot runs completed.")
 
     for run in runs:
-        run.update(compute_run_stats(run['m'], window))
+        run.update(compute_run_stats(run['m']))
 
     T0_table = aggregate_by_T0(runs, n_pilot, n_seeds, window)
     selection = select_T0(T0_table)
