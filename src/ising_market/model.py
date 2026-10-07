@@ -47,7 +47,8 @@ class FinancialIsingModel:
         self.T0 = T0
         self.kappa = kappa # Price impact factor
         self.alpha = alpha #Volatiltiy feedback strenght
-        self.h = h0 # extrenal field (news/macro pressure)
+        self.h0 = h0 # baseline external field (news/macro pressure)
+        self.h = h0  # current external field = h0 + trend term
         self.network_type = network_type
         self.sigma0 = None # baseline volatility for feedback scaling
         self.h_trend = 0.0 # sensitivity of external field to recent returns
@@ -63,6 +64,7 @@ class FinancialIsingModel:
 
 
         self.price = 100.0 # current price level
+        self.track_price = True     # pilots switch this off: exp(kappa*m) per sweep overflows
         self.ret_hist = []          # log-return time series
         self.vol_hist = []          # realised volatility history
         self.T_hist   = []          # effective temperature history
@@ -74,8 +76,10 @@ class FinancialIsingModel:
     def initialize_spins(self,start = 'random'):
         if start == 'random':
             spins = self.rng.choice([-1, 1], size=self.N)
-        if start == 'up':
+        elif start == 'up':
             spins = np.ones(self.N, dtype=int)
+        else:
+            raise ValueError(f"start must be 'random' or 'up', got {start!r}")
         self.m_prev = 0
         return spins
 
@@ -179,8 +183,9 @@ class FinancialIsingModel:
         # kappa is price impact — tune to match target volatility level
         r = self.kappa * (m)
 
-        self.price *= np.exp(r)
-        self.price_hist.append(self.price)
+        if self.track_price:
+            self.price *= np.exp(r)
+            self.price_hist.append(self.price)
         self.ret_hist.append(r)
         self.m_hist.append(m)
         # self.m_prev = m
@@ -207,7 +212,7 @@ class FinancialIsingModel:
         # Positive recent returns → buy pressure → h > 0
         # h_trend controls sensitivity; keep small (0.1–0.5) initially
         trend  = np.mean(self.ret_hist[-window:])
-        self.h = self.h_trend * trend
+        self.h = self.h0 + self.h_trend * trend
 
     def leverage_cascade(self, threshold=0.05):
         # If the last return is a large loss, force long agents to sell
@@ -473,7 +478,7 @@ def plot_susceptibility_vs_returns(N=50, T0=1.0, kappa=0.2,
 
     # Shade large negative return events so you can visually check
     # whether chi spikes preceded them
-    threshold = np.percentile(aligned_rets, 1)   # bottom 5% = extreme moves
+    threshold = np.percentile(aligned_rets, 1)   # bottom 1% = extreme moves
     for i, r in enumerate(aligned_rets):
         if r < threshold:
             ax1.axvline(i, color='red', alpha=0.3, linewidth=0.8)
@@ -533,6 +538,7 @@ def _run_pilot(J,T0,rng,start,n_burn,n_pilot):
     model = FinancialIsingModel(N=N,network_type='empirical',T0=T0,
                                 kappa=1.0,alpha=0.0,h0=0.0,rng=rng)
 
+    model.track_price = False
     model.spins = model.initialize_spins(start=start)
     model.build_empirical_network(J)
     for _ in range(n_burn):
@@ -679,7 +685,7 @@ def aggregate_by_T0(runs, n_pilot, n_seeds, window):
             'k_star_p75':k_star_p75,'n_runs': len(pooled),
         })
 
-        T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
+    T0_table = pd.DataFrame(rows).sort_values('i_T0').reset_index(drop=True)
 
     eps_by_T0 = defaultdict(list)
     for seed_id in range(n_seeds):
