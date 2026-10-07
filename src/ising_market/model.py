@@ -196,13 +196,20 @@ class FinancialIsingModel:
         if len(self.ret_hist) < window:
             return
 
-        sigma = np.std(self.ret_hist[-window:])
+        # Volatility feedback, flipped and centred: T = T0 * (sigma/sigma0)**(-alpha).
+        # High recent vol LOWERS T (more herding). With eps = dln s/dln T < 0 (every mixed regime for
+        # J >= 0, h = 0) this is destabilising with loop gain ~ alpha*|eps|; the old rule
+        # T0*(1 + alpha*sigma/sigma0) could only damp vol and also lifted T above T0.
+        # sigma is measured on m (kappa-free), so sigma0 = calibrate_parameters()['sigma0'] directly;
+        # set sweeps_per_step = k so each step is one day.
+        sigma = np.std(self.m_hist[-window:])
 
-        if self.sigma0 is None:          # first time we have enough history
+        if self.sigma0 is None:          # fallback only: baseline from the first full window
             self.sigma0 = sigma if sigma > 0 else 1e-6
-            return                       # don't update T yet, just set baseline
+            return
 
-        self.T = self.T0 * (1.0 + self.alpha * sigma / self.sigma0)
+        if sigma > 0:
+            self.T = self.T0 * (sigma / self.sigma0) ** (-self.alpha)
         self.T_hist.append(self.T)
         self.vol_hist.append(sigma)
 
@@ -764,7 +771,8 @@ def select_T0(T0_table,
     n_runs = T0_table.n_runs
     frac_s_valid = T0_table.n_s_valid/n_runs
     n_eff_per_run = T0_table.n_eff/n_runs
-    eps_lcb = T0_table.eps_mean - eps_sigma * T0_table.eps_se
+    # flipped feedback needs eps < 0: upper confidence bound below zero
+    eps_ucb = T0_table.eps_mean + eps_sigma * T0_table.eps_se
 
     criteria = pd.DataFrame({
         'equilibrated':T0_table.equilibrated,
@@ -774,7 +782,7 @@ def select_T0(T0_table,
         'thinning': (T0_table.ac1_mean.abs() + ac1_sigma * T0_table.ac1_se) <= max_ac1,
         'zero_mean': T0_table.frac_z_high <= max_frac_z_high,
         'eps_defined': np.isfinite(T0_table.eps_mean) & np.isfinite(T0_table.eps_se),
-        'eps_positive': eps_lcb > 0,
+        'eps_negative': eps_ucb < 0,
     }, index = T0_table.index)
 
     survivors = criteria.all(axis=1)
@@ -787,7 +795,7 @@ def select_T0(T0_table,
         k = None
         T0_winner = None
     else:
-        winner_idx = eps_lcb.where(survivors).idxmax()
+        winner_idx = eps_ucb.where(survivors).idxmin()   # strongest confidently-negative eps
         winner_row = T0_table.loc[winner_idx]
         assert np.isfinite(winner_row.k), "survivor row has undefined k — check converged criterion"
         k = int(winner_row.k)
@@ -799,12 +807,12 @@ def select_T0(T0_table,
             'T0': T0_table.T0,
             'survivor': survivors,
             'first_failure': first_failure,
-            'eps_lcb': eps_lcb,
+            'eps_ucb': eps_ucb,
         })
         print(report.to_string(index=False))
         if winner_idx is not None:
             print(f"\nSelected T0={T0_winner:.4f} (i_T0={winner_row.i_T0}), "
-                  f"k={k}, eps_lcb={eps_lcb[winner_idx]:.3f}")
+                  f"k={k}, eps_ucb={eps_ucb[winner_idx]:.3f}")
         else:
             print("\nNo T0 satisfies all criteria.")
 
@@ -837,14 +845,14 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
     print(f"\nEmpirical mean daily vol: {sigma_empirical:.4f}")
     print(f"Target vol:               {target_vol:.4f}")
 
-    # --- Step 2: scan T0 to find disordered regime ---
-    # At alpha=0, kurtosis should be close to 3 (Gaussian)
-    # Too low T0 → kurtosis >> 3 even at alpha=0 (system ordered)
-    # Too high T0 → all dynamics wash out
+    # --- Step 2: scan T0 across the crossover ---
+    # Returns are kappa*m, so the alpha=0 return kurtosis is R_mean (1.0 frozen -> 3.0 deep disordered).
+    # With the flipped feedback the admissible rows are on the mixed (hot) side, so the grid
+    # runs to 1.30*lambda; same log spacing as the old 0.35-0.85 grid.
 
     lam = np.linalg.eigvalsh(J_empirical).max() # mean-field crossover estimate
     if T0_search is None:
-        T0_search = np.geomspace(0.35*lam, 0.85*lam, 9)
+        T0_search = np.geomspace(0.35*lam, 1.30*lam, 13)
     print(f"lambda_max(J) = {lam:.4f}")
     print(f"Scanning T0 in {T0_search.round(4)}")
 
@@ -866,8 +874,12 @@ def calibrate_parameters(rets, J_empirical, target_vol=0.01,
 
     T0_table = aggregate_by_T0(runs, n_pilot, window)
     selection = select_T0(T0_table)
+    row = selection['row']
 
     return {
+        'T0':              selection['T0'],
+        'k':               selection['k'],                       # sweeps per day -> model.sweeps_per_step
+        'sigma0':          None if row is None else row.s_mean,  # baseline rolling std of m at k -> model.sigma0
         'runs':            runs,
         'T0_table':        T0_table,
         'selection':       selection,
