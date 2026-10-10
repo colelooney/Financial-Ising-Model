@@ -7,40 +7,88 @@ The repository contains the model, a calibration pipeline that picks the baselin
 ## Status (October 2026)
 
 - The calibration pipeline runs end to end on real data: 29 US large caps, 2005–2007, from Yahoo Finance.
-- The original goal of reproducing fat tails turned out to be out of reach in this setup (see *Findings*).
+- The calibrated model with volatility feedback produces volatility clustering on the real network, but the original goal of reproducing fat tails is out of reach in this setup (see *Findings*).
+- The figures below are reproduced by `scripts/make_figures.py` from the frozen data.
 - The project is moving toward **early-warning signals for regime flips**, using the model as a lab where every flip's timing and cause are known (see *Next steps*).
 
 ## Findings so far
 
-**The volatility feedback has to lower T when volatility rises.**
+All figures come from the frozen 2005–2007 data for 29 stocks; temperatures are quoted as multiples of λ = λ_max(J).
+
+### The data: one market mode and two tight sectors
+
+![Correlation matrix by sector, eigenvalue spectrum and market-mode loadings](docs/figures/fig1_network.png)
+
+- **Network.** 753 trading days; J keeps 206 of 406 pairs (50.7%) and λ_max(J) = 1.814. The mean pairwise correlation is 0.32, so the 0.3 cut-off sits right at the typical correlation.
+- **One market mode.** It carries 35% of the variance (λ₁ = 10.2), and every stock loads on it with the same sign; financials and GE load most.
+- **Little else above noise.** Only two more eigenvalues clear the random-matrix noise edge of 1.43: an energy mode (λ₂ = 2.0) and a financials-versus-tech mode (λ₃ = 1.65).
+- **Uneven connectivity.** Financials (average correlation 0.71) and energy (0.81) are the tight blocks; tech averages 0.35 and health care 0.28. UNH has no edges at all.
+
+### The volatility feedback has to lower T when volatility rises
+
+![Equilibrium width of m falls with T everywhere; 20-day volatility only rises where runs don't mix](docs/figures/fig3_griffiths.png)
+
 - For ferromagnetic couplings (J ≥ 0) at h = 0, Griffiths' second inequality makes ⟨m²⟩ non-increasing in T. So in any well-mixed run, volatility *falls* as T rises (ε = d ln σ / d ln T ≤ 0).
-- The original rule T = T0(1 + α σ/σ0) could therefore only damp volatility, and it also shifted the operating point above T0.
-- The model now uses **T = T0 (σ/σ0)^(−α)**: higher volatility means lower T, i.e. more herding. The loop gain is about α|ε|.
+- **On the real network:**
+  - The equilibrium width σ_m falls at every temperature in the scan, from 0.86 to 0.31.
+  - The 20-day volatility s rises with T only in rows that don't mix (local slopes up to +6). There it measures fluctuations inside a single well: s/σ_m = 0.10–0.30.
+  - From 0.75 λ up, s/σ_m ≈ 0.96 and the two slopes agree.
+  - The positive ε the original pipeline required exists only in that artefact.
+- **The old rule could only damp.** T = T0(1 + α σ/σ0) therefore could only damp volatility, and it also shifted the operating point above T0.
+- **The new rule.** The model now uses **T = T0 (σ/σ0)^(−α)**: higher volatility means lower T, i.e. more herding. The loop gain is G = α|ε|.
 
-**Calibration on real data:**
-- **Network:** 29 tickers (TWX is delisted), 753 trading days, 206 edges (50.7% density), λ_max(J) = 1.814.
-- **Rows across the T0 scan:** frozen at 0.35–0.39 λ, tunnelling onset near 0.44 λ, unconverged at 0.49–0.54 λ, well mixed from about 0.6 λ upwards.
-- **Selected T0 varies by seed.** Across seeds 42–44 it moved between 0.839 λ and 0.936 λ, because ε is nearly flat there.
-  - T0 = 0.936 λ = 1.699 (k = 18 sweeps/day, ε ≈ −1.19) was the only top row to survive all three seeds.
+### Calibration on real data
 
-**Deployment, measured on a synthetic test network with matched structure:**
-- **Clustering appears.** At loop gain α|ε| ≈ 0.5–0.65, mean AC(|r|) over lags 1–20 is about 0.04–0.10 and decays slowly.
-- **Return autocorrelation appears only at lag 1.** It comes from the feedback slowing the dynamics, so k has to be re-chosen under feedback; doubling k removed it at gain 0.5.
-- **Above a gain of about 0.9–1.2 the operating point runs away** (mean T/T0 rises from 1.27 to over 2).
+![ε by row and seed, and the first check each row fails](docs/figures/fig5_selection.png)
 
-**No fat tails.**
-- With returns ∝ m and N = 29, m is bounded and bimodal.
-- Return kurtosis is 1.3–2.5 at every admissible T0 on real data. On the synthetic network it never exceeds 3 at any stable feedback strength.
+- **Three regimes across the T0 scan** ([regime map](docs/figures/fig2_regimes.png), [example runs](docs/figures/fig4_traces.png)):
+  - frozen in one well at 0.35–0.39 λ;
+  - too slow to converge at 0.44–0.54 λ (τ_int of 500–900 sweeps, against a cap of 167);
+  - mixing from 0.60 λ.
+- **The clock depends strongly on T0.** One trading day is 432 sweeps at 0.60 λ, 18 at 0.94 λ and 7 at 1.30 λ.
+- **The winning row changes with the seed:** 0.936 λ in seeds 42 and 44, 0.839 λ in seed 43.
+  - ε lies between −1.08 and −1.25 for every row from 0.75 λ to 1.05 λ, so noise of 0.01–0.03 decides which one wins.
+  - The most common failure is the check that random and all-up starts agree: 10 of the 25 failed rows across the three seeds. Seed 42 alone fails it on 6 of 13 rows, 4 of them in the mixing regime.
+- **Recommended:** T0 = 0.936 λ = 1.699, k = 18 sweeps/day, σ0 = 0.415, ε = −1.19. It is the only row that passes in all three seeds.
+
+### Deployment on the real network: clustering, with two artefacts
+
+![Clustering, operating point and kurtosis against the loop gain](docs/figures/fig6_feedback.png)
+
+- **Clustering grows with the loop gain** (mean AC(|r|) over lags 1–20):
+
+  | G = α\|ε\| | 0.25 | 0.5 | 0.75 | 1 |
+  |---|---|---|---|---|
+  | mean AC(\|r\|), lags 1–20 | 0.019 | 0.051 | 0.122 | 0.292 |
+
+- **Stability.** With ε = −1.19, linear stability needs α < 0.84 (G < 1).
+  - The operating point holds up to G = 0.75 (mean T/T0 = 1.04).
+  - Past G = 1 it runs away: mean T/T0 is 1.11 at G = 1, 1.36 at 1.25 and 1.87 at 1.5.
+- **Artefact 1: lag-1 return autocorrelation grows with the clustering.** It is 0.073 at G = 0.5 and 0.26 at G = 1, against −0.10 for the index. Feedback slows the dynamics, so k has to be re-chosen under feedback; on the synthetic test network, doubling k removed it at G = 0.5 and kept the clustering.
+- **Artefact 2: the clustering has a fixed memory.** In the model, AC(|r|) is flat out to lag 20 and then drops, because the feedback averages over a 20-day window. The market's AC(|r|) decays gradually instead.
+
+### No fat tails
+
+![Model returns next to the equal-weight index: series, AC(|r|), distribution](docs/figures/fig7_model_vs_data.png)
+
+- **Model vs index.** The equal-weight index of the 29 stocks has kurtosis 4.7 and mean AC(|r|) 0.10. The model at G = 0.5 has kurtosis 1.9 and mean AC(|r|) 0.05; without feedback it shows no clustering at all.
+- **Returns ∝ m are capped.** Since |m| ≤ 1, a standardised return can't exceed about 1/σ_m ≈ 2.3 standard deviations at the selected T0, while the index has days beyond 4.
+- **m is two-humped even when mixing** ([fig. 4](docs/figures/fig4_traces.png)), which pushes kurtosis below 3. The Binder ratio, which equals the return kurtosis, is 1.17–2.46 across the mixing rows.
+- **Kurtosis passes 3 only after runaway**, at G = 1.5, when T has drifted 87% above T0.
+- **Part of the index's tails and clustering is one regime shift.** Its daily volatility was 0.65–0.77% in each half-year until mid-2007 and 1.26% from July 2007. Its worst day is 27 February 2007, at −4.5 standard deviations.
 - This is a limit of how returns are defined in the model, not of the calibration.
 
 ## Repository layout
 
 ```
 src/ising_market/model.py   model, calibration pipeline, deployment harness
+scripts/calibrate_real.py   downloads the data once, freezes it in data/, calibrates seeds 42-44
+scripts/make_figures.py     the figures and numbers summary used in this README
+docs/figures/               committed copies of the figures
 pyproject.toml, uv.lock     dependencies (managed with uv)
 ```
 
-`data/` and `results/` are git-ignored; regenerate them by rerunning the calibration. A fresh Yahoo download can differ slightly from an earlier one, so keep a frozen copy of the returns for anything you need to reproduce exactly.
+`data/` and `results/` are git-ignored; regenerate them by rerunning the scripts. A fresh Yahoo download can differ slightly from an earlier one, so keep a frozen copy of the returns for anything you need to reproduce exactly.
 
 ## Setup
 
@@ -59,6 +107,16 @@ uv run python -m ising_market.model
 This downloads the 30 tickers (TWX fails and is dropped) and builds J. It then runs the T0 scan: 13 temperatures × 8 seeds × 2 starts = 208 pilot runs of 50,000 sweeps each after a 10,000-sweep burn-in. Finally it prints the selection report. The compute part takes about half a minute on a laptop.
 
 The command-line flags (`--mode`, `--alpha`, …) are parsed but not used yet.
+
+## Reproducing the figures
+
+```bash
+uv run python scripts/calibrate_real.py   # once: download, freeze data/, calibrate seeds 42-44
+uv run python scripts/make_figures.py     # about a minute: results/figures/*.png and summary.md
+mkdir -p docs/figures && cp results/figures/fig*.png docs/figures/
+```
+
+`make_figures.py` reruns the calibration for seeds 42–44 and picks the row that passes in the most seeds. It then runs the deployed model at seven loop gains (4 runs × 10,000 days each). `--quick` makes shorter runs to check the pipeline; `--replot` redraws from the saved numbers without simulating.
 
 ## Using the model from Python
 
@@ -95,7 +153,8 @@ if cal["T0"] is not None:
 ## Known limitations
 
 - **The equilibration check is noisy.** It compares 8 runs against 8 with a 2σ test and falsely fails about 30% of well-mixed rows. Together with the flat ε near its optimum, this is why the selected T0 depends on the seed.
-- **No fat tails.** Returns ∝ m are bounded and bimodal (see *Findings*).
+- **No fat tails.** Returns ∝ m are bounded (about ±2.3 standard deviations at the selected T0) and two-humped (see *Findings*).
+- **Feedback artefacts.** Clustering comes with positive lag-1 return autocorrelation unless k is re-chosen under feedback, and its memory stops at the 20-day window.
 - **numba cache.** The on-disk cache is tied to the name the module was imported under. If you import `model.py` both as a top-level `model` and as `ising_market.model`, you'll get `ModuleNotFoundError: No module named 'model'`. Delete the `*.nbi` and `*.nbc` files under `src/` (`find src \( -name "*.nbi" -o -name "*.nbc" \) -delete`), or set `cache=False` (compiling costs under a second per kernel).
 - **Unfinished pieces of the old code:**
   - the CLI flags do nothing yet;
@@ -136,6 +195,8 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 - Select T0 by pooling seeds (survival frequency and mean ε per row) instead of taking one seed's best row.
 - Fix the equilibration test: a Bonferroni threshold across its three statistics, or more seeds per start.
 - Re-choose k under feedback before any deployment runs.
+- Replace the 20-day volatility window with an EWMA or several windows, so the clustering decays instead of stopping at 20 days.
+- Compare the model with the index both with and without the second half of 2007.
 - Add pytest tests: bit-identical pilots, FFT autocorrelation matching the direct method, and a seed-pinned calibration snapshot.
 - Set `cache=False` on the numba kernels, wire up the CLI, update the `plot_*` helpers, and calibrate κ against index volatility.
 
@@ -157,4 +218,4 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 
 ---
 
-<sub>**AI assistance.** This project used Claude (Anthropic) as a research assistant. Claude reviewed the calibration code, identified the statistical issues described above, ran diagnostic simulations on a synthetic test network, and drafted code changes and documentation. The author reviewed and applied every change, ran the verification checks and the real-data calibration, and is responsible for the code and conclusions.</sub>
+<sub>**AI assistance.** A main learning goal of this project was for me to learn how to effectively AI as a research assistant. This project used Claude (Anthropic) as a research assistant. Claude reviewed the calibration code, identified the statistical issues described above, ran diagnostic simulations on a synthetic test network, and drafted code changes, the figure script and documentation. The author reviewed and applied every change, ran the verification checks, the real-data calibration and the figures, and is responsible for the code and conclusions.</sub>

@@ -1023,14 +1023,103 @@ if __name__ == "__main__":
     
 
     TICKERS = [
-        'AAPL','MSFT','AMZN','INTC','CSCO',          # tech (pre-2005)
-        'JPM','BAC','GS','WFC','C',                   # financials
-        'XOM','CVX','COP',                             # energy
-        'JNJ','PFE','UNH','MRK',                       # healthcare
-        'WMT','HD','MCD',                              # consumer
-        'CAT','GE','MMM','BA',                         # industrials
-        'DIS','TWX',                                   # media (TWX = Time Warner)
-        'AMD','IBM','ORCL','TXN'                       # semiconductors
+        # =========================
+        # Technology
+        # =========================
+        'AAPL', 'MSFT', 'INTC', 'CSCO', 'IBM', 'ORCL', 'TXN',
+        'AMD', 'ADBE', 'AMAT', 'ADI', 'ADSK', 'APH', 'BRCM',
+        'CA', 'CTSH', 'DELL', 'EMC', 'ERTS', 'FIS', 'FISV',
+        'HPQ', 'HIT', 'JDSU', 'JNPR', 'KLAC', 'LLTC', 'LRCX',
+        'MCHP', 'MRVL', 'MSI', 'MXIM', 'NTAP', 'NVDA', 'PAYX',
+        'QCOM', 'RIMM', 'SNDK', 'STX', 'SYMC', 'TER', 'VRSN',
+        'WDC', 'XLNX', 'XRX',
+
+        # =========================
+        # Financials
+        # =========================
+        'JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'USB', 'PNC',
+        'COF', 'AIG', 'MET', 'PRU', 'ALL', 'TRV', 'AFL',
+        'BK', 'STT', 'NTRS', 'FITB', 'KEY', 'RF', 'HBAN',
+        'BBT', 'CMA', 'ZION', 'MTB', 'STI', 'ETFC', 'SCHW',
+        'AMTD', 'CME', 'ICE', 'NYX', 'LEH', 'MER', 'WB',
+        'WM', 'CB', 'ACE',
+
+        # =========================
+        # Energy
+        # =========================
+        'XOM', 'CVX', 'COP', 'SLB', 'HAL', 'OXY', 'VLO',
+        'MPC', 'PSX', 'EOG', 'APA', 'DVN', 'MRO', 'HES',
+        'NOV', 'BHI', 'XTO', 'RIG', 'DO', 'SUN',
+
+        # =========================
+        # Healthcare / Pharma
+        # =========================
+        'JNJ', 'PFE', 'MRK', 'ABT', 'LLY', 'BMY', 'AMGN',
+        'GILD', 'BIIB', 'CELG', 'GENZ', 'MDT', 'SYK', 'BSX',
+        'BDX', 'BAX', 'ZMH', 'ISRG', 'VAR', 'XRAY',
+        'UNH', 'AET', 'CI', 'HUM', 'WLP',
+        'HSP', 'MHS', 'WYE', 'SGP', 'WPI',
+
+        # =========================
+        # Consumer Staples
+        # =========================
+        'WMT', 'COST', 'TGT', 'HD', 'LOW', 'MCD', 'SBUX',
+        'KO', 'PEP', 'MO', 'PM', 'KFT', 'GIS', 'K',
+        'CL', 'CLX', 'PG', 'EL', 'AVP', 'CPB', 'CAG',
+        'KMB', 'ADM', 'HSY', 'MKC', 'SYY', 'WAG',
+
+        # =========================
+        # Consumer Discretionary
+        # =========================
+        'DIS', 'TWX', 'CMCSA', 'DTV', 'FO', 'CBS', 'NWS',
+        'NWSA', 'VIA', 'VIAB',
+        'F', 'GM', 'AN', 'AZO', 'ORLY', 'GPC',
+        'BBY', 'CCL', 'RCL', 'NCLH',
+        'NKE', 'RL', 'TJX', 'ROST', 'GPS',
+        'MHK', 'WHR', 'PHM', 'LEN', 'DHI',
+        'MAR', 'HOT', 'H', 'WYNN', 'MGM',
+        'YUM', 'DRI', 'SNI', 'FOXA',
+
+        # =========================
+        # Industrials
+        # =========================
+        'GE', 'CAT', 'MMM', 'BA', 'HON', 'UTX', 'DE',
+        'EMR', 'ETN', 'DOV', 'ITW', 'ROK', 'PH',
+        'CMI', 'PCAR', 'IR', 'SWK', 'TXT',
+        'GD', 'LMT', 'NOC', 'RTN', 'COL',
+        'CSX', 'NSC', 'UNP', 'FDX', 'UPS',
+        'WM', 'RSG', 'R', 'FAST', 'CTAS',
+        'PWR', 'FLR', 'JEC', 'GWW', 'MAS',
+
+        # =========================
+        # Materials
+        # =========================
+        'DD', 'DOW', 'ECL', 'APD', 'PX', 'SHW',
+        'PPG', 'NUE', 'STLD', 'AA', 'FCX',
+        'IP', 'PKG', 'SEE', 'BLL', 'CF', 'MOS',
+        'VMC', 'MLM',
+
+        # =========================
+        # Telecom / Communication
+        # =========================
+        'T', 'VZ', 'CTL', 'LVLT',
+        'Q', 'S', 'PCS',
+        'TMX', 'TWX', 'CMCSA', 'DISH',
+
+        # =========================
+        # Utilities
+        # =========================
+        'NEE', 'DUK', 'SO', 'D', 'EXC', 'AEP',
+        'ED', 'PEG', 'FE', 'ETR', 'PPL',
+        'XEL', 'SRE', 'PCG', 'EIX', 'AES',
+        'CMS', 'DTE', 'NI', 'SCG', 'CNP',
+
+        # =========================
+        # Real Estate / REITs
+        # =========================
+        'PLD', 'SPG', 'VNO', 'EQR', 'AVB', 'PSA',
+        'HCP', 'HCN', 'BXP', 'VTR', 'WY',
+        'FRT', 'REG', 'ARE', 'SLG'
     ]
 
     rets, valid_tickers = fetch_market_data(
@@ -1045,3 +1134,10 @@ if __name__ == "__main__":
     result = calibrate_parameters(rets, J_emp,n_pilot=50000,n_burn=10000)
     assert 'T0_table' in result and 'selection' in result
     print(result['T0_table'][['T0','equilibrated','frac_converged','eps_mean']])
+
+    if result['selection']['T0'] is not None:
+        print(f"Selected T0 = {result['T0']:.4f}, k = {result['k']}, "
+              f"sigma0 = {result['sigma0']:.4f}")
+        sim = simulate_deployed(J_emp, result['T0'], result['k'],alpha=0.4,sigma0=result['sigma0'],n_days=10000)
+        print(stylised_facts(sim["r"]))
+
