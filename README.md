@@ -8,7 +8,8 @@ The repository contains the model, a calibration pipeline that picks the baselin
 
 - The calibration pipeline runs end to end on real data: 29 US large caps, 2005–2007, from Yahoo Finance.
 - The calibrated model with volatility feedback produces volatility clustering on the real network, but the original goal of reproducing fat tails is out of reach in this setup (see *Findings*).
-- The figures below are reproduced by `scripts/make_figures.py` from the frozen data.
+- Five other ways of turning spins into returns, taken from the literature, were compared against the index on the same network. None of them produces market-like tails on 29 stocks (see *Other ways to turn spins into returns*).
+- The figures below are reproduced by `scripts/make_figures.py` and `scripts/compare_return_models.py` from the frozen data.
 - The project is moving toward **early-warning signals for regime flips**, using the model as a lab where every flip's timing and cause are known (see *Next steps*).
 
 ## Findings so far
@@ -64,7 +65,9 @@ All figures come from the frozen 2005–2007 data for 29 stocks; temperatures ar
 - **Stability.** With ε = −1.19, linear stability needs α < 0.84 (G < 1).
   - The operating point holds up to G = 0.75 (mean T/T0 = 1.04).
   - Past G = 1 it runs away: mean T/T0 is 1.11 at G = 1, 1.36 at 1.25 and 1.87 at 1.5.
-- **Artefact 1: lag-1 return autocorrelation grows with the clustering.** It is 0.073 at G = 0.5 and 0.26 at G = 1, against −0.10 for the index. Feedback slows the dynamics, so k has to be re-chosen under feedback; on the synthetic test network, doubling k removed it at G = 0.5 and kept the clustering.
+- **Artefact 1: lag-1 return autocorrelation grows with the clustering.** It is 0.073 at G = 0.5 and 0.26 at G = 1, against −0.10 for the index. Feedback slows the dynamics, so the clock k chosen at α = 0 is too short.
+  - Doubling k to 36 removes it at G ≤ 0.75 and leaves the clustering unchanged: AC(r, 1) falls from 0.066 to 0.006 at G = 0.5 (mean AC(|r|) stays 0.053), and from 0.125 to 0.028 at G = 0.75 (`scripts/k_under_feedback.py`).
+  - At G = 1 it persists even at k = 144. T then spends about a quarter of days below 0.65 λ, near the slow regime, where m tends to keep its sign from one day to the next.
 - **Artefact 2: the clustering has a fixed memory.** In the model, AC(|r|) is flat out to lag 20 and then drops, because the feedback averages over a 20-day window. The market's AC(|r|) decays gradually instead.
 
 ### No fat tails
@@ -78,12 +81,67 @@ All figures come from the frozen 2005–2007 data for 29 stocks; temperatures ar
 - **Part of the index's tails and clustering is one regime shift.** Its daily volatility was 0.65–0.77% in each half-year until mid-2007 and 1.26% from July 2007. Its worst day is 27 February 2007, at −4.5 standard deviations.
 - This is a limit of how returns are defined in the model, not of the calibration.
 
+### Other ways to turn spins into returns
+
+![Scorecard: each model's moments against the index's](docs/figures/figR3_scorecard.png)
+
+**The test.**
+- Five return mechanisms from the literature run on the same 29-stock network.
+- Each is calibrated to the equal-weight index by the method of simulated moments (Franke & Westerhoff 2012):
+  - seven moments: E|z|, AC(r, 1), the Hill tail index, and AC(|r|) at lags 1, 5, 10 and 25;
+  - weighted by the inverse block-bootstrap covariance of the index's moments;
+  - two-stage grid search: the best three grid points are re-scored on longer runs.
+- Four more moments are held out: kurtosis, 5-day kurtosis, P(|z| > 3) and AC(r², 1).
+- Two yardsticks: a GARCH(1,1)-t fitted by maximum likelihood, and an i.i.d. Gaussian.
+
+| rank | model | mechanism | J | p |
+|---|---|---|---|---|
+| 1 | GARCH(1,1)-t | statistical benchmark, 4 parameters fitted by maximum likelihood (Bollerslev 1986, 1987) | 25 | 0.16 |
+| 2 | Gaussian i.i.d. | null model, no parameters | 35 | 0.005 |
+| 3 | Bornholdt frustration | global minority-type coupling −α_B s_i \|M\|, r = ΔM (Bornholdt 2001; Kaizoji et al. 2002) | 49 | 0.06 |
+| 4 | Change, r = Δm | market clearing against fundamentalists (Kaizoji et al. 2002) on our dynamics, 1 sweep a day | 62 | < 0.003 |
+| 5 | Cluster trading, stable feedback | Cont & Bouchaud (2000) activity on Fortuin–Kasteleyn clusters (our combination) | 77 | 0.007 |
+| 6 | Cluster trading | the same with stronger feedback; T drifts to 3.1 T0 | 104 | 0.54 |
+| 7 | Random couplings | Krawiecki, Hołyst & Helbing (2002) | 114 | < 0.003 |
+| 8 | Level, r = m (current) | excess demand moves the price | 141 | 0.05 |
+
+**Reading the table.**
+- **J** is the weighted distance from the index's moments; lower is better.
+- **p** is the share of model samples of the index's length that sit further from the model's own long-run moments than the index does. A high p means the index is a plausible draw from the model. A model whose moments vary a lot between samples, like the runaway cluster model, can have a high p and a high J at once.
+- Full tables are written to `results/return_models/return_models.md`.
+
+**What it shows.**
+- **No spin mechanism beats an i.i.d. Gaussian at N = 29.** The current level mapping comes last. Its returns are bounded and two-humped, which puts E|z| and the Hill index each about 9 standard errors from the index.
+- **Bornholdt's frustration dynamics is the best mechanism.** It matches the negative lag-1 autocorrelation (−0.12 vs −0.10) and gets the tail index within 2 standard errors (5.5 vs 3.9), but has no clustering beyond lag 1.
+- **Cluster trading only gets fat tails by running away.** With feedback strong enough to cluster, T settles at 3.1 T0 and the tails become too fat (Hill 2.2, kurtosis 11.5). With the feedback kept stable, its tails are thin (Hill 8.7).
+- **GARCH fits best, but it has no mechanism.** It also overshoots kurtosis (6.4 vs 4.7) and 5-day kurtosis (5.7 vs 3.1), and misses the negative lag-1 autocorrelation.
+
+![The published mechanisms need many agents, and Bornholdt's also needs local structure](docs/figures/figR5_scaling.png)
+
+**Why the spin models fall short: system size and network structure.** Run at their papers' settings, both published dynamics reproduce the papers at their own scale:
+- Random couplings reach a Hill index of 2.9 at N = 1000; the paper's analytic value is 2.89.
+- Bornholdt's lattice model reaches a Hill index of 4.0 and AC(|r|) ≈ 0.2 at lag 10 with N = 1024.
+
+Both effects fade as N shrinks towards 29. Bornholdt's clustering also disappears on an all-to-all network, even at N = 1024. A 29-stock network with half of all pairs connected is both small and close to all-to-all.
+
+More figures: [tail distributions](docs/figures/figR1_tails.png), [AC(|r|) by model](docs/figures/figR2_clustering.png), [sample paths](docs/figures/figR4_paths.png).
+
+**Caveat on the target.** The index is short (753 days) and includes one regime shift. Without the second half of 2007:
+- AC(|r|) at lags 5 and 10 roughly halves (0.15 → 0.09 and 0.13 → 0.07);
+- the Hill index rises from 3.9 to 4.9.
+
+A longer index series, passed with `--target-csv`, would make the comparison sharper.
+
+**Not tested:** threshold (three-state) traders (Iori 2002). Their fat tails rely on trade frictions and a volume-dependent price impact, which would need cash and inventory accounting this model doesn't have.
+
 ## Repository layout
 
 ```
 src/ising_market/model.py   model, calibration pipeline, deployment harness
 scripts/calibrate_real.py   downloads the data once, freezes it in data/, calibrates seeds 42-44
 scripts/make_figures.py     the figures and numbers summary used in this README
+scripts/compare_return_models.py   the return-model comparison (figures figR1-figR5, tables)
+scripts/k_under_feedback.py        the check of the clock k under feedback
 docs/figures/               committed copies of the figures
 pyproject.toml, uv.lock     dependencies (managed with uv)
 ```
@@ -113,10 +171,11 @@ The command-line flags (`--mode`, `--alpha`, …) are parsed but not used yet.
 ```bash
 uv run python scripts/calibrate_real.py   # once: download, freeze data/, calibrate seeds 42-44
 uv run python scripts/make_figures.py     # about a minute: results/figures/*.png and summary.md
-mkdir -p docs/figures && cp results/figures/fig*.png docs/figures/
+uv run python scripts/compare_return_models.py   # about 5 minutes: results/return_models/
+mkdir -p docs/figures && cp results/figures/fig*.png results/return_models/figR*.png docs/figures/
 ```
 
-`make_figures.py` reruns the calibration for seeds 42–44 and picks the row that passes in the most seeds. It then runs the deployed model at seven loop gains (4 runs × 10,000 days each). `--quick` makes shorter runs to check the pipeline; `--replot` redraws from the saved numbers without simulating.
+`make_figures.py` reruns the calibration for seeds 42–44 and picks the row that passes in the most seeds. It then runs the deployed model at seven loop gains (4 runs × 10,000 days each). `compare_return_models.py` reads that run's `figdata.pkl` (network, recommended row and the index) and needs no download. Both scripts accept `--quick` for shorter runs to check the pipeline, and `--replot` to redraw from the saved numbers without simulating.
 
 ## Using the model from Python
 
@@ -155,6 +214,7 @@ if cal["T0"] is not None:
 - **The equilibration check is noisy.** It compares 8 runs against 8 with a 2σ test and falsely fails about 30% of well-mixed rows. Together with the flat ε near its optimum, this is why the selected T0 depends on the seed.
 - **No fat tails.** Returns ∝ m are bounded (about ±2.3 standard deviations at the selected T0) and two-humped (see *Findings*).
 - **Feedback artefacts.** Clustering comes with positive lag-1 return autocorrelation unless k is re-chosen under feedback, and its memory stops at the 20-day window.
+- **A short comparison target.** The return models are compared against one 753-day index that includes the 2007 regime shift.
 - **numba cache.** The on-disk cache is tied to the name the module was imported under. If you import `model.py` both as a top-level `model` and as `ising_market.model`, you'll get `ModuleNotFoundError: No module named 'model'`. Delete the `*.nbi` and `*.nbc` files under `src/` (`find src \( -name "*.nbi" -o -name "*.nbc" \) -delete`), or set `cache=False` (compiling costs under a second per kernel).
 - **Unfinished pieces of the old code:**
   - the CLI flags do nothing yet;
@@ -194,7 +254,7 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 
 - Select T0 by pooling seeds (survival frequency and mean ε per row) instead of taking one seed's best row.
 - Fix the equilibration test: a Bonferroni threshold across its three statistics, or more seeds per start.
-- Re-choose k under feedback before any deployment runs.
+- Under feedback, use k = 36 (twice the calibrated clock) for G ≤ 0.75, or re-derive k from τ_int measured under feedback.
 - Replace the 20-day volatility window with an EWMA or several windows, so the clustering decays instead of stopping at 20 days.
 - Compare the model with the index both with and without the second half of 2007.
 - Add pytest tests: bit-identical pilots, FFT autocorrelation matching the direct method, and a seed-pinned calibration snapshot.
@@ -205,6 +265,8 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 - Fit couplings by inverse Ising (pseudo-likelihood) instead of thresholding correlations, so the market's own distance from criticality can be estimated.
 - Model crashes as avalanches in a driven random-field Ising model, which is a known route to heavy tails.
 - Use a kinetic (asymmetric) Ising model to study directed influence across APAC time zones.
+- Run Bornholdt's frustration dynamics on a sparse network of a larger universe, such as a minimum spanning tree (Mantegna 1999) or a planar maximally filtered graph (Tumminello et al. 2005). That gives it both ingredients it needs: many agents and local structure.
+- Repeat the return-model comparison against a long index series, e.g. 20 years of daily data.
 
 ## References
 
@@ -215,7 +277,19 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 - Guttal, V. et al. (2016). Lack of critical slowing down suggests that financial meltdowns are not critical transitions, yet rising variability could signal systemic risk. *PLoS ONE* 11(1), e0144198. https://doi.org/10.1371/journal.pone.0144198
 - Bury, T. M. et al. (2021). Deep learning for early warning signals of tipping points. *PNAS* 118, e2106140118. https://doi.org/10.1073/pnas.2106140118
 - Bury, T. (2013). Market structure explained by pairwise interactions. *Physica A* 392(6), 1375–1385. https://arxiv.org/abs/1210.8380
+- Bornholdt, S. (2001). Expectation bubbles in a spin model of markets: intermittency from frustration across scales. *Int. J. Mod. Phys. C* 12(5), 667–674. https://arxiv.org/abs/cond-mat/0105224
+- Kaizoji, T., Bornholdt, S. & Fujiwara, Y. (2002). Dynamics of price and trading volume in a spin model of stock markets with heterogeneous agents. *Physica A* 316. https://arxiv.org/abs/cond-mat/0207253
+- Krawiecki, A., Hołyst, J. A. & Helbing, D. (2002). Volatility clustering and scaling for financial time series due to attractor bubbling. *Phys. Rev. Lett.* 89, 158701. https://arxiv.org/abs/cond-mat/0210044
+- Cont, R. & Bouchaud, J.-P. (2000). Herd behavior and aggregate fluctuations in financial markets. *Macroeconomic Dynamics* 4(2), 170–196. https://arxiv.org/abs/cond-mat/9712318
+- Fortuin, C. M. & Kasteleyn, P. W. (1972). On the random-cluster model I. *Physica* 57, 536–564.
+- Franke, R. & Westerhoff, F. (2012). Structural stochastic volatility in asset pricing dynamics: estimation and model contest. *J. Econ. Dyn. Control* 36(8), 1193–1211.
+- Hill, B. M. (1975). A simple general approach to inference about the tail of a distribution. *Ann. Statist.* 3(5), 1163–1174.
+- Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity. *J. Econometrics* 31(3), 307–327.
+- Bollerslev, T. (1987). A conditionally heteroskedastic time series model for speculative prices and rates of return. *Rev. Econ. Stat.* 69(3), 542–547.
+- Iori, G. (2002). A microsimulation of traders activity in the stock market: the role of heterogeneity, agents' interactions and trade frictions. *J. Econ. Behav. Organ.* 49(2), 269–285.
+- Mantegna, R. N. (1999). Hierarchical structure in financial markets. *Eur. Phys. J. B* 11, 193–197.
+- Tumminello, M., Aste, T., Di Matteo, T. & Mantegna, R. N. (2005). A tool for filtering information in complex systems. *PNAS* 102(30), 10421–10426.
 
 ---
 
-<sub>**AI assistance.** A main learning goal of this project was for me to learn how to effectively AI as a research assistant. This project used Claude (Anthropic) as a research assistant. Claude reviewed the calibration code, identified the statistical issues described above, ran diagnostic simulations on a synthetic test network, and drafted code changes, the figure script and documentation. The author reviewed and applied every change, ran the verification checks, the real-data calibration and the figures, and is responsible for the code and conclusions.</sub>
+<sub>**AI assistance.** A main learning goal of this project was how to effectively use AI in a research project. This project used Claude (Anthropic) as a research assistant. Claude reviewed the calibration code, identified the statistical issues described above, ran diagnostic simulations on a synthetic test network, researched and implemented the return-model comparison and ran it on the author's frozen data, and drafted code changes, the figure scripts and documentation. The author reviewed and applied every change, ran the verification checks, the real-data calibration and the figures, and is responsible for the code and conclusions.</sub>
