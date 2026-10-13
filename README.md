@@ -84,7 +84,7 @@ The first five subsections use the frozen 2005–2007 data for 29 stocks. The re
 
 ### Other ways to turn spins into returns
 
-![Scorecard: each model's moments against the index's](docs/figures/figR3_scorecard.png)
+![Scorecard: each model's moments against the index's](docs/figures/return_models/figR3_scorecard.png)
 
 **The test.**
 - Five return mechanisms from the literature run on the same network.
@@ -112,7 +112,7 @@ The first five subsections use the frozen 2005–2007 data for 29 stocks. The re
 - **J** is the weighted distance from the index's moments; lower is better.
 - **p** is the share of model samples of the index's length that sit further from the model's own long-run moments than the index does. A high p means the index is a plausible draw from the model. The run used `--quick` (40 samples per model), so p < 0.025 means none of them did.
 - The run was calibrated with the earlier weighting (the inverse of the full bootstrap covariance) and re-scored with each moment's own variance (`--replot --weights diag`). The parameters are the ones chosen under the earlier weighting.
-- Full tables are written to `results/return_models_us100/rescored_diag/return_models.md`.
+- Full tables are written to `results/return_models_us100_2005_2024/rescored_diag/return_models.md`.
 
 **What it shows.**
 - **Only GARCH survives.** It is the one model the index is a plausible draw from (p = 0.62). It matches 8 of the 9 fitted moments within 1.2 standard errors, including AC(|r|) out to lag 100, with a + b = 0.992. It misses the negative lag-1 autocorrelation (0.01 vs −0.11) and overshoots kurtosis (37 vs 18.6) and 5-day kurtosis (42 vs 13).
@@ -124,7 +124,7 @@ The first five subsections use the frozen 2005–2007 data for 29 stocks. The re
 
 **On 29 stocks** (2005–2007, 753 days) the ranking is similar under either weighting: GARCH first and the level mapping last. Bornholdt's dynamics was the best mechanism there, with the tail index within 2 standard errors (5.5 vs 3.9). Cluster trading only got fat tails by running away (Hill 2.2, kurtosis 11.5 at T = 3.1 T0).
 
-![The published mechanisms need many agents, and Bornholdt's also needs local structure](docs/figures/figR5_scaling.png)
+![The published mechanisms need many agents, and Bornholdt's also needs local structure](docs/figures/return_models/figR5_scaling.png)
 
 **Why the spin models fall short: system size and network structure.** Run at their papers' settings, both published dynamics reproduce the papers at their own scale:
 - Random couplings reach a Hill index of 2.9–3.1 at N = 1000; the paper's analytic value is 2.89.
@@ -132,7 +132,7 @@ The first five subsections use the frozen 2005–2007 data for 29 stocks. The re
 
 Both effects fade as N shrinks. Bornholdt's clustering also disappears on an all-to-all network, even at N = 1024. The 100-stock network is both small and close to all-to-all (87% of pairs connected). Even at N = 1000, the published dynamics reach kurtosis 7.6 at most, against 18.6 for the 2005–2024 index.
 
-More figures: [tail distributions](docs/figures/figR1_tails.png), [AC(|r|) by model](docs/figures/figR2_clustering.png), [sample paths](docs/figures/figR4_paths.png).
+More figures: [tail distributions](docs/figures/return_models/figR1_tails.png), [AC(|r|) by model](docs/figures/return_models/figR2_clustering.png), [sample paths](docs/figures/return_models/figR4_paths.png).
 
 **Caveats.** The index's tails come mostly from 2008 and 2020. The universe has survivorship bias: every stock in it is still listed today.
 
@@ -176,11 +176,12 @@ scripts/k_under_feedback.py        the check of the clock k under feedback
 scripts/garch_x_breadth.py  the breadth test: does alignment predict index volatility?
 scripts/freeze_data.py      downloads, cleans and freezes a larger ticker universe
 universes/tickers_us_large_cap.csv  202 US large caps in 11 sectors (101 marked core)
-docs/figures/               committed copies of the figures
+docs/figures/               copies of the figures shown in this README (return_models/: figR1-figR5)
+results/                    outputs of each run: figures, tables, logs and pickles for --replot
 pyproject.toml, uv.lock     dependencies (managed with uv)
 ```
 
-`data/` and `results/` are git-ignored; regenerate them by rerunning the scripts. A fresh Yahoo download can differ slightly from an earlier one, so keep a frozen copy of the returns for anything you need to reproduce exactly.
+`data/` is git-ignored; `freeze_data.py` and `calibrate_real.py` regenerate it. `results/` is committed, including the pickles behind each run, so long runs can be redrawn or re-scored with `--replot` instead of rerun (the 100-stock comparison took 13 hours). A fresh Yahoo download can differ slightly from an earlier one, so keep a frozen copy of the returns for anything you need to reproduce exactly.
 
 ## Setup
 
@@ -219,13 +220,15 @@ The 29-stock, three-year sample is too small to separate the return models. Its 
 uv run python scripts/freeze_data.py --core-only          # data/rets_us100_2005_2024.pkl etc.
 uv run python scripts/make_figures.py --rets data/rets_us100_2005_2024.pkl \
     --J data/J_us100_2005_2024.npy --sectors data/sectors_us100_2005_2024.csv \
-    --out results/figures_us100
-uv run python scripts/compare_return_models.py --figdata results/figures_us100/figdata.pkl \
-    --out results/return_models_us100 --quick --jobs 4
-uv run python scripts/compare_return_models.py --out results/return_models_us100 --replot \
-    --weights diag                                        # re-score a run made with --weights full
+    --out results/figures_us100_2005_2024
+uv run python scripts/compare_return_models.py \
+    --figdata results/figures_us100_2005_2024/figdata.pkl \
+    --out results/return_models_us100_2005_2024 --quick --jobs 4
+uv run python scripts/compare_return_models.py --out results/return_models_us100_2005_2024 \
+    --replot --weights diag                     # re-score a run made with --weights full
 uv run python scripts/garch_x_breadth.py --rets data/rets_us100_2005_2024.pkl   # about 20 s
-cp results/return_models_us100/rescored_diag/figR*.png results/garch_x/garch_x.png docs/figures/
+cp results/return_models_us100_2005_2024/rescored_diag/figR*.png docs/figures/return_models/
+cp results/garch_x/garch_x.png docs/figures/
 ```
 
 `freeze_data.py` drops tickers that start late, end early or have gaps, forward-fills gaps of up to 3 days, and lists every single-day move above 25% in `data/outliers_<tag>.csv`. Check that list for spin-offs Yahoo didn't adjust. It writes a report, `data/freeze_<tag>.txt`, with network density at several thresholds. The tag in the file names is the number of tickers kept, so it can differ from 101. For targets of 2,500 days or more, `compare_return_models.py` also fits AC(|r|) at lags 50 and 100, and uses bootstrap blocks of a twentieth of the sample. It prints a run-time estimate before it starts. Run time grows with N² and with the calibrated clock k. On 100 stocks, k = 248 sweeps a day, and the `--quick` comparison took 13 hours. `--jobs` runs models in parallel processes, and `--add` adds models to an existing run, e.g. to run the slow ones later. `--weights full` uses the inverse of the full bootstrap covariance instead of each moment's own variance. With `--replot`, `--weights` re-scores a saved run without re-calibrating. `make_figures.py` builds J at `--threshold` when the `--J` file doesn't exist yet, and stops if an existing J was built at a different threshold. The list has survivorship bias: every stock in it is still listed today.

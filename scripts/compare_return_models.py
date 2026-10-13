@@ -15,6 +15,13 @@ Long targets (2,500 days or more, e.g. 2005-2024 from scripts/freeze_data.py) al
 lags 50 and 100, use bootstrap blocks of a twentieth of the sample, and use fewer, longer
 model windows (--windows overrides the number).
 
+J weights each targeted moment by its own bootstrap variance by default. --weights full uses the
+inverse of the full bootstrap covariance instead, as Franke & Westerhoff do; with strongly
+correlated moments and few independent blocks that matrix is close to singular, and it then
+charges little for missing along the direction in which resamples differ most (calm against
+turbulent samples). Our model's feedback is set on a grid of loop gains G = alpha |eps|, so
+G = 1 is the linear stability limit on every dataset.
+
 Outputs (in --out, default results/return_models): figR1_tails.png, figR2_clustering.png,
 figR3_scorecard.png, figR4_paths.png, figR5_scaling.png, return_models.md (tables) and
 compare.pkl (all numbers).
@@ -67,6 +74,9 @@ HILL_CAP = 30.0    # bounded or discrete returns can give an infinite Hill index
 BURN = {"ours": 500, "bornholdt": 2_000, "krawiecki": 2_000}
 LONG_TARGET = 2_500  # days; from here the target also pins down AC(|r|) at lags 50 and 100
 
+WEIGHTS = {"diag": "W diagonal: each moment weighted by its own bootstrap variance",
+           "full": "W = inverse of the full bootstrap covariance (Franke & Westerhoff 2012)"}
+
 TARGETED_BASE = ["E|z|", "AC(r,1)", "Hill", "AC|r| 1", "AC|r| 5", "AC|r| 10", "AC|r| 25"]
 TARGETED_LONG = ["AC|r| 50", "AC|r| 100"]
 UNTARGETED = ["kurtosis", "kurtosis 5d", "P(|z|>3)", "AC(r²,1)"]
@@ -89,26 +99,26 @@ def scaled_mode(mode, n, n_windows=None):
 
 MODELS = {
     "level": {"n_par": 2, "label": "Level, r = m (current)", "family": "ours", "mapping": "level",
-              "grid": {"alpha": [0.0, 0.2, 0.4, 0.55, 0.7, 0.85, 1.0, 1.2], "k_x": [1, 2, 4]},
+              "grid": {"G": [0.0, 0.25, 0.5, 0.65, 0.8, 1.0, 1.2, 1.4], "k_x": [1, 2, 4]},
               "source": "Excess demand moves the price; Cont & Bouchaud (2000), Krawiecki et al. "
                         "(2002) use the same mapping"},
     "change": {"n_par": 2, "label": "Change, r = Δm", "family": "ours", "mapping": "change",
-               "grid": {"alpha": [0.0, 0.4, 0.8, 1.2, 1.6], "k": [1, 2, 4, 8]},
+               "grid": {"G": [0.0, 0.5, 0.95, 1.4, 1.9], "k": [1, 2, 4, 8]},
                "source": "Market clearing against fundamentalists: Kaizoji, Bornholdt & Fujiwara "
                          "(2002)"},
     "cluster": {"n_par": 2, "label": "Cluster trading", "family": "ours", "mapping": "cluster",
-                "grid": {"alpha": [0.0, 0.4, 0.8, 1.2, 1.6],
+                "grid": {"G": [0.0, 0.5, 0.95, 1.4, 1.9],
                          "a": [0.04, 0.07, 0.1, 0.15, 0.2, 0.3]},
                 "fixed": {"k_x": 2},
                 "source": "Cont & Bouchaud (2000) activity on Fortuin-Kasteleyn clusters "
                           "(combination ours)"},
-    "cluster_stable": {"n_par": 2, "label": "Cluster trading, α ≤ 0.8", "family": "ours",
+    "cluster_stable": {"n_par": 2, "label": "Cluster trading, G < 1", "family": "ours",
                        "mapping": "cluster",
-                       "grid": {"alpha": [0.0, 0.2, 0.4, 0.6, 0.8],
+                       "grid": {"G": [0.0, 0.25, 0.5, 0.7, 0.9],
                                 "a": [0.04, 0.07, 0.1, 0.15, 0.2, 0.3]},
                        "fixed": {"k_x": 2},
-                       "source": "as above, with the feedback kept in the range where T stays "
-                                 "near T0"},
+                       "source": "as above, with the loop gain below the linear stability limit, "
+                                 "where T stays near T0"},
     "bornholdt": {"n_par": 2, "label": "Bornholdt frustration", "family": "bornholdt",
                   "mapping": "change",
                   "grid": {"theta": [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
@@ -321,9 +331,10 @@ def simulate(ctx, name, p, n_days, seed, with_T=False):
     return np.random.default_rng(seed).standard_normal(n_days)
 
 
-def grid_points(spec, k0):
-    """Every parameter combination in the model's grid. A "k_x" entry is a multiple of the
-    calibrated clock k0 and becomes an absolute "k", so the grid follows the dataset."""
+def grid_points(spec, k0, eps):
+    """Every parameter combination in the model's grid, scaled to the dataset: a "k_x" entry is
+    a multiple of the calibrated clock k0 and becomes an absolute "k", and a loop gain "G"
+    becomes the feedback exponent alpha = G / |eps| (G = 1 is the linear stability limit)."""
     keys = list(spec.get("grid", {}))
     if keys:
         mesh = np.meshgrid(*[spec["grid"][key] for key in keys], indexing="ij")
@@ -334,7 +345,8 @@ def grid_points(spec, k0):
     for p in points:
         if "k_x" in p:
             p["k"] = float(max(1, round(p.pop("k_x") * k0)))
-    return points
+    return [{"G": p["G"], "alpha": p["G"] / abs(eps)}
+            | {key: v for key, v in p.items() if key != "G"} if "G" in p else p for p in points]
 
 
 # GARCH(1,1) with unit-variance Student-t innovations ----------------------------------------------
@@ -455,7 +467,7 @@ def calibrate(ctx, name, target, W, mode, keys, log):
     if spec["family"] in ("garch", "gauss"):
         return None, []
     results = []
-    for p in grid_points(spec, ctx.k0):
+    for p in grid_points(spec, ctx.k0, ctx.eps):
         ms = [moments(simulate(ctx, name, p, mode["cal_days"], 1000 + s))
               for s in range(mode["cal_seeds"])]
         m = {key: float(np.nanmean([x[key] for x in ms])) for key in ms[0]}
@@ -567,7 +579,7 @@ def estimate_minutes(ctx, mode, n, names):
         spec = MODELS[name]
         if spec["family"] in ("garch", "gauss"):
             continue
-        ks = [p.get("k", 1.0) for p in grid_points(spec, ctx.k0)]
+        ks = [p.get("k", 1.0) for p in grid_points(spec, ctx.k0, ctx.eps)]
         extra = clusters if spec["family"] == "ours" and spec["mapping"] == "cluster" else 0.0
         cal = (sum(k * sweep + extra for k in ks) * mode["cal_seeds"]
                * (mode["cal_days"] + BURN[spec["family"]]))
@@ -596,6 +608,7 @@ def run_model(job):
 
 
 def compute(args, mode):
+    args.weights = args.weights or "diag"
     with open(args.figdata, "rb") as f:
         fd = pickle.load(f)
     if fd["cons"] is None:
@@ -619,24 +632,30 @@ def compute(args, mode):
         with open(cache, "rb") as f:
             d = pickle.load(f)
         same = (np.array_equal(d.get("J"), ctx.J) and np.array_equal(d["r_target"], r_target)
-                and d["mode"] == mode)
+                and d["mode"] == mode and d.get("weights", "full") == args.weights)
         if not same:
             sys.exit(f"{cache} was made from a different network, target or run settings "
-                     "(--quick, --windows): use another --out, or the same settings")
+                     "(--quick, --windows, --weights): use another --out, or the same settings")
         print(f"Adding {', '.join(args.models)} to {', '.join(d['res']) or 'nothing'} in {cache}")
     else:
         t0 = time.time()
         block = max(BLOCK_MIN, n // 20)
         boot = block_bootstrap(r_target, mode["n_boot"], block)
         se = {key: float(np.nanstd([b[key] for b in boot])) for key in keys + UNTARGETED}
-        W = np.linalg.inv(np.cov(np.array([vec(b, keys) for b in boot]).T))
+        cov = np.cov(np.array([vec(b, keys) for b in boot]).T)
+        W_by = {"diag": np.diag(1 / np.diag(cov)), "full": np.linalg.inv(cov)}
+        other = "full" if args.weights == "diag" else "diag"
+        corr = cov / np.sqrt(np.outer(np.diag(cov), np.diag(cov)))
         d = {"scaling": None, "mode": mode, "target_name": target_name, "r_target": r_target,
              "target": moments(r_target), "se": se, "targeted": keys, "block": block, "N": N,
-             "J": ctx.J, "W": W, "res": {}, "grids": {}, "T0_lam": ctx.T0 / ctx.lam,
-             "eps": ctx.eps, "runtime_s": time.time() - t0}
+             "J": ctx.J, "weights": args.weights, "W": W_by[args.weights],
+             "W_other": W_by[other], "cond": float(np.linalg.cond(corr)), "res": {},
+             "grids": {}, "T0_lam": ctx.T0 / ctx.lam, "eps": ctx.eps,
+             "runtime_s": time.time() - t0}
     print(f"Target: {d['target_name']} ({n} days)")
     print(f"  targeted moments: {', '.join(keys)}; bootstrap {mode['n_boot']} samples, "
-          f"block {d['block']} days")
+          f"block {d['block']} days; {WEIGHTS[args.weights]} (condition number of the "
+          f"moments' correlation matrix {d['cond']:.0f})")
     print(f"  model runs: calibration {mode['cal_days']:,} days x {mode['cal_seeds']}, "
           f"evaluation {mode['eval_days']:,} days x {mode['eval_seeds']}, "
           f"{mode['n_windows']} windows of {n} days")
@@ -661,6 +680,7 @@ def compute(args, mode):
 
     def store(result):
         name, e, grid, text = result
+        e["J_other"] = j_stat(e["long"], d["target"], d["W_other"], keys)
         d["res"][name] = e
         if grid is not None:
             d["grids"][name] = grid
@@ -738,8 +758,8 @@ def param_text(name, p):
         return f"a = {p['a']:.2f}, b = {p['b']:.2f}, ν = {p['nu']:.1f}"
     if not p:
         return "no parameters"
-    fmt = {"alpha": "α = {:g}", "k": "k = {:g}", "a": "a = {:g}", "theta": "T = {:g} λ",
-           "alpha_rel": "α_B = {:g} λ", "A": "A = {:g}", "h": "h = {:g}"}
+    fmt = {"G": "G = {:g}", "alpha": "α = {:.3g}", "k": "k = {:g}", "a": "a = {:g}",
+           "theta": "T = {:g} λ", "alpha_rel": "α_B = {:g} λ", "A": "A = {:g}", "h": "h = {:g}"}
     return ", ".join(fmt[key].format(v) for key, v in p.items())
 
 
@@ -947,32 +967,65 @@ def fig_scaling(d):
 # Tables
 # ----------------------------------------------------------------------------------------------
 
+def rescore(d, weights):
+    """Score a saved run under another weighting: J and p from the stored long-run and window
+    moments. The calibrated parameters stay as they were chosen under the original weighting."""
+    keys, se = d.get("targeted", TARGETED_BASE), d["se"]
+    old = d.get("weights", "full")
+    W_by = {old: d["W"],
+            "diag": np.diag([1 / se[k] ** 2 for k in keys])}
+    if "full" not in W_by:
+        W_by["full"] = d["W_other"]
+    for e in d["res"].values():
+        e["J_other"] = e["J"]
+        e["J"] = j_stat(e["long"], d["target"], W_by[weights], keys)
+        J_win = np.array([j_stat(w, e["long"], W_by[weights], keys) for w in e["windows"]])
+        e["p_J"] = float(np.mean(J_win >= e["J"]))
+        e["J_runs"] = None   # per-run moments aren't saved
+    d["W"], d["W_other"], d["weights"], d["rescored_from"] = W_by[weights], W_by[old], weights, old
+
+
 def write_tables(d, out):
     order = ranked(d)
     t, se = d["target"], d["se"]
     targeted = d.get("targeted", TARGETED_BASE)
     keys = targeted + UNTARGETED
+    weights = d.get("weights", "full")
+    other = "full" if weights == "diag" else "diagonal"
+    if "W_other" not in d and weights == "full":   # runs saved before --weights existed
+        d["W_other"] = np.diag([1 / se[k] ** 2 for k in targeted])
+    for e in d["res"].values():
+        if "J_other" not in e and "W_other" in d:
+            e["J_other"] = j_stat(e["long"], t, d["W_other"], targeted)
     L = [
         "# Return models compared", "",
         f"Generated {d['created']} in {d['runtime_s'] / 60:.1f} min. Target: {d['target_name']} "
         f"({len(d['r_target'])} days). Spin models run on the calibrated network at "
         f"T0 = {d['T0_lam']:.3f} λ_max (ε = {d['eps']:.2f}) where they use it.", "",
         "Calibration: grid search minimising J = (m − m*)' W (m − m*) over the targeted moments, "
-        "with W the inverse bootstrap covariance of the target's moments (moving blocks of "
-        f"{d.get('block', 50)} days). p is the share of model samples of the target's length "
-        "whose J around the model's own long-run moments exceeds the target's J. MCR is the share "
-        "of those samples with every targeted moment inside the target's 95% interval.", "",
+        f"with {WEIGHTS[weights]}. The bootstrap uses moving blocks of {d.get('block', 50)} days"
+        + (f"; the condition number of the moments' bootstrap correlation matrix is "
+           f"{d['cond']:.0f}" if "cond" in d else "") + ".", "",
+        (f"Re-scored from a run calibrated with the {d['rescored_from']} weighting: the "
+         "parameters were chosen under that weighting, J and p are recomputed. " if
+         "rescored_from" in d else "")
+        + "p is the share of model samples of the target's length whose J around the model's own "
+        "long-run moments exceeds the target's J. MCR is the share of those samples with every "
+        "targeted moment inside the target's 95% interval. The last J column uses the other "
+        "weighting, for comparison.", "",
         "## Ranking", "",
         "| rank | model | free parameters | calibrated values | J | J, single runs | p | MCR "
-        "| mean T/T0 | source |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        f"| mean T/T0 | J, {other} W | source |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for i, n in enumerate(order, 1):
         e = d["res"][n]
         tt = "" if e["T_mean"] is None else f"{e['T_mean']:.2f}"
+        jo = f"{e['J_other']:.1f}" if "J_other" in e else ""
+        runs = "–" if e["J_runs"] is None else f"{e['J_runs'][0]:.0f}-{e['J_runs'][1]:.0f}"
         L.append(f"| {i} | {short(n)} | {MODELS[n]['n_par']} | {param_text(n, e['params'])} | "
-                 f"{e['J']:.1f} | {e['J_runs'][0]:.0f}-{e['J_runs'][1]:.0f} | "
-                 f"{e['p_J']:.3f} | {e['mcr']:.3f} | {tt} | {MODELS[n]['source']} |")
+                 f"{e['J']:.1f} | {runs} | "
+                 f"{e['p_J']:.3f} | {e['mcr']:.3f} | {tt} | {jo} | {MODELS[n]['source']} |")
     L += ["", "## Moments (long-run model values; target with bootstrap SE)", "",
           "| moment | target | " + " | ".join(short(n) for n in order) + " |",
           "|---|---|" + "---|" * len(order)]
@@ -1014,6 +1067,11 @@ def main():
     p.add_argument("--windows", type=int, default=None,
                    help="number of target-length model windows for p and coverage (default: "
                         "400 for a 753-day target, fewer for longer targets, at least 100)")
+    p.add_argument("--weights", choices=["diag", "full"], default=None,
+                   help="moment weighting in J: diag (default) uses each moment's own bootstrap "
+                        "variance; full uses the inverse bootstrap covariance, which is unstable "
+                        "when the moments are strongly correlated. With --replot, re-scores a "
+                        "saved run under the other weighting (parameters stay as calibrated)")
     p.add_argument("--quick", action="store_true")
     p.add_argument("--replot", action="store_true")
     p.add_argument("--formats", nargs="+", default=["png"])
@@ -1024,6 +1082,14 @@ def main():
     if args.replot:
         with open(cache, "rb") as f:
             d = pickle.load(f)
+        if "weights" not in d:   # saved before the loop-gain grids
+            MODELS["cluster_stable"]["label"] = "Cluster trading, α ≤ 0.8"
+            MODELS["cluster_stable"]["source"] = "as above, with the feedback exponent α ≤ 0.8"
+        if args.weights and args.weights != d.get("weights", "full"):
+            rescore(d, args.weights)
+            out = out / f"rescored_{args.weights}"
+            out.mkdir(exist_ok=True)
+            print(f"Re-scored with {WEIGHTS[args.weights]}; writing to {out}")
     else:
         d = compute(args, QUICK if args.quick else FULL)
         with open(cache, "wb") as f:

@@ -31,7 +31,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--figdata", default="results/figures/figdata.pkl")
     p.add_argument("--gains", type=float, nargs="+", default=[0.0, 0.5, 0.75, 1.0])
-    p.add_argument("--ks", type=int, nargs="+", default=[18, 36, 72, 144])
+    p.add_argument("--ks", type=int, nargs="+", default=None,
+                   help="clocks to try (default: 1, 2, 4 and 8 times the calibrated k)")
     p.add_argument("--runs", type=int, default=4)
     p.add_argument("--days", type=int, default=10_000)
     args = p.parse_args()
@@ -40,9 +41,10 @@ def main():
         d = pickle.load(f)
     J, cons = d["net"]["J"], d["cons"]
     print(f"T0 = {cons['T0']:.4f}, calibrated k = {cons['k']}, eps = {cons['eps']:.3f}")
+    ks = args.ks or [cons["k"] * x for x in (1, 2, 4, 8)]
     print("   G     k  AC(r,1)  mean AC|r| 1-20  kurtosis  mean T/T0")
     for G in args.gains:
-        for k in args.ks:
+        for k in ks:
             rows = []
             for rep in range(args.runs):
                 sim = simulate_deployed(J, cons["T0"], k, G / abs(cons["eps"]), cons["sigma0"],

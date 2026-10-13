@@ -274,10 +274,19 @@ def compute(args, mode):
     if Path(args.J).exists():
         J = np.load(args.J)
     else:
-        print(f"{args.J} not found: building J from the returns")
-        J, _ = im.build_empirical_J(rets, verbose=False)
+        print(f"{args.J} not found: building J from the returns at threshold {args.threshold} "
+              "and saving it there")
+        J, _ = im.build_empirical_J(rets, threshold=args.threshold, verbose=False)
+        np.save(args.J, J)
     if J.shape[0] != rets.shape[1]:
         sys.exit(f"J is {J.shape[0]}x{J.shape[0]} but the returns have {rets.shape[1]} tickers")
+    C = rets.corr().to_numpy()
+    off = ~np.eye(len(C), dtype=bool)
+    if not np.array_equal((J != 0) & off, (C > args.threshold) & off):
+        kept = C[(J != 0) & off]
+        sys.exit(f"{args.J} keeps the pairs with correlation above {kept.min():.2f}, not "
+                 f"--threshold {args.threshold}. Pass the threshold J was built with, or give a "
+                 "new --J path and it is built at --threshold.")
     out = Path(args.out)
     t_start = time.time()
     mode = dict(mode, n_days=max(mode["n_days"], len(rets)))   # fig7 shows a data-length sample
@@ -984,7 +993,8 @@ def main():
         print(f"Loaded {cache} (computed {d['created']})")
     else:
         if not Path(args.rets).exists():
-            sys.exit(f"{args.rets} not found: run scripts/calibrate_real.py to freeze the data")
+            sys.exit(f"{args.rets} not found: freeze it with scripts/freeze_data.py (or "
+                     "scripts/calibrate_real.py for the original 29 stocks); see ls data/")
         d = compute(args, QUICK if args.quick else FULL)
     if args.sectors:
         d["sectors"] = load_sectors(args.sectors)

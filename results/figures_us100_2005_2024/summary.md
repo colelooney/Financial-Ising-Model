@@ -5,7 +5,7 @@ Generated 2026-10-11 20:22:40 from `data/rets_us100_2005_2024.pkl` in 11.2 min. 
 ## Network
 
 - 100 stocks, 5032 trading days (2005-01-04 to 2024-12-31)
-- J keeps correlations above 0.4: 4301 of 4950 pairs (86.9%)
+- J keeps correlations above 0.3: 4301 of 4950 pairs (86.9%)
 - lambda_max(J) = 9.0153
 - Largest eigenvalue of C: 41.79 (42% of the variance); 7 eigenvalues above the random-matrix edge 1.30
 

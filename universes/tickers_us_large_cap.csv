@@ -1,0 +1,203 @@
+ticker,sector,core
+AAPL,Information Technology,1
+MSFT,Information Technology,1
+NVDA,Information Technology,1
+ORCL,Information Technology,1
+CSCO,Information Technology,1
+ADBE,Information Technology,1
+INTC,Information Technology,1
+IBM,Information Technology,1
+TXN,Information Technology,1
+QCOM,Information Technology,1
+AMD,Information Technology,0
+AMAT,Information Technology,0
+ADI,Information Technology,0
+LRCX,Information Technology,0
+KLAC,Information Technology,0
+MU,Information Technology,0
+INTU,Information Technology,0
+CTSH,Information Technology,0
+GLW,Information Technology,0
+APH,Information Technology,0
+CDNS,Information Technology,0
+ADSK,Information Technology,0
+JPM,Financials,1
+BAC,Financials,1
+WFC,Financials,1
+C,Financials,1
+GS,Financials,1
+MS,Financials,1
+AXP,Financials,1
+USB,Financials,1
+PNC,Financials,1
+BLK,Financials,1
+BK,Financials,0
+SCHW,Financials,0
+AIG,Financials,0
+MET,Financials,0
+PRU,Financials,0
+ALL,Financials,0
+AFL,Financials,0
+PGR,Financials,0
+COF,Financials,0
+STT,Financials,0
+TROW,Financials,0
+BRK-B,Financials,0
+JNJ,Health Care,1
+PFE,Health Care,1
+MRK,Health Care,1
+ABT,Health Care,1
+BMY,Health Care,1
+LLY,Health Care,1
+AMGN,Health Care,1
+UNH,Health Care,1
+MDT,Health Care,1
+TMO,Health Care,1
+GILD,Health Care,0
+CVS,Health Care,0
+HUM,Health Care,0
+SYK,Health Care,0
+BSX,Health Care,0
+BDX,Health Care,0
+DHR,Health Care,0
+BAX,Health Care,0
+REGN,Health Care,0
+VRTX,Health Care,0
+BIIB,Health Care,0
+MCK,Health Care,0
+AMZN,Consumer Discretionary,1
+HD,Consumer Discretionary,1
+LOW,Consumer Discretionary,1
+MCD,Consumer Discretionary,1
+NKE,Consumer Discretionary,1
+SBUX,Consumer Discretionary,1
+TJX,Consumer Discretionary,1
+F,Consumer Discretionary,1
+YUM,Consumer Discretionary,1
+MAR,Consumer Discretionary,1
+ROST,Consumer Discretionary,0
+ORLY,Consumer Discretionary,0
+AZO,Consumer Discretionary,0
+DHI,Consumer Discretionary,0
+LEN,Consumer Discretionary,0
+PHM,Consumer Discretionary,0
+GPC,Consumer Discretionary,0
+BBY,Consumer Discretionary,0
+EBAY,Consumer Discretionary,0
+HAS,Consumer Discretionary,0
+PG,Consumer Staples,1
+KO,Consumer Staples,1
+PEP,Consumer Staples,1
+WMT,Consumer Staples,1
+COST,Consumer Staples,1
+CL,Consumer Staples,1
+KMB,Consumer Staples,1
+GIS,Consumer Staples,1
+MO,Consumer Staples,1
+TGT,Consumer Staples,1
+HSY,Consumer Staples,0
+SYY,Consumer Staples,0
+KR,Consumer Staples,0
+CLX,Consumer Staples,0
+MKC,Consumer Staples,0
+ADM,Consumer Staples,0
+TSN,Consumer Staples,0
+CAG,Consumer Staples,0
+CHD,Consumer Staples,0
+SJM,Consumer Staples,0
+XOM,Energy,1
+CVX,Energy,1
+COP,Energy,1
+SLB,Energy,1
+HAL,Energy,1
+OXY,Energy,1
+EOG,Energy,1
+DVN,Energy,1
+VLO,Energy,1
+WMB,Energy,1
+APA,Energy,0
+OKE,Energy,0
+EQT,Energy,0
+MUR,Energy,0
+HP,Energy,0
+RRC,Energy,0
+CNX,Energy,0
+TPL,Energy,0
+GE,Industrials,1
+HON,Industrials,1
+MMM,Industrials,1
+CAT,Industrials,1
+DE,Industrials,1
+BA,Industrials,1
+LMT,Industrials,1
+UNP,Industrials,1
+UPS,Industrials,1
+EMR,Industrials,1
+GD,Industrials,0
+NOC,Industrials,0
+CSX,Industrials,0
+FDX,Industrials,0
+ETN,Industrials,0
+ITW,Industrials,0
+PH,Industrials,0
+ROK,Industrials,0
+DOV,Industrials,0
+CMI,Industrials,0
+PCAR,Industrials,0
+WM,Industrials,0
+APD,Materials,1
+ECL,Materials,1
+SHW,Materials,1
+NEM,Materials,1
+FCX,Materials,1
+NUE,Materials,1
+PPG,Materials,1
+IP,Materials,1
+VMC,Materials,0
+MLM,Materials,0
+IFF,Materials,0
+ALB,Materials,0
+AVY,Materials,0
+EMN,Materials,0
+PKG,Materials,0
+DUK,Utilities,1
+SO,Utilities,1
+D,Utilities,1
+AEP,Utilities,1
+EXC,Utilities,1
+SRE,Utilities,1
+XEL,Utilities,1
+ED,Utilities,1
+PEG,Utilities,1
+WEC,Utilities,0
+DTE,Utilities,0
+ETR,Utilities,0
+PPL,Utilities,0
+AEE,Utilities,0
+CMS,Utilities,0
+CNP,Utilities,0
+NI,Utilities,0
+EIX,Utilities,0
+SPG,Real Estate,1
+PSA,Real Estate,1
+EQR,Real Estate,1
+O,Real Estate,1
+VTR,Real Estate,1
+BXP,Real Estate,1
+KIM,Real Estate,1
+HST,Real Estate,1
+ESS,Real Estate,0
+MAA,Real Estate,0
+REG,Real Estate,0
+FRT,Real Estate,0
+ARE,Real Estate,0
+UDR,Real Estate,0
+CPT,Real Estate,0
+GOOGL,Communication Services,1
+VZ,Communication Services,1
+T,Communication Services,1
+CMCSA,Communication Services,1
+DIS,Communication Services,1
+NFLX,Communication Services,1
+OMC,Communication Services,0
+TTWO,Communication Services,0
