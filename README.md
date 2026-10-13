@@ -4,6 +4,22 @@ A statistical-physics model of a stock market. Each of N stocks is an Ising spin
 
 The repository contains the model, a calibration pipeline that picks the baseline temperature T0 and the time scale k (Monte Carlo sweeps per trading day) from pilot simulations, and a compiled harness for running the calibrated model and measuring stylised facts.
 
+## Summary
+
+**Question.** Can an Ising model of interacting traders, built on real stock correlations, reproduce how markets move? And does its central quantity, the alignment of stocks (the magnetisation), carry information about future volatility?
+
+**Built.** A calibrated Ising market model on an empirical correlation network: 29 US large caps over 2005–2007, and 100 over 2005–2024. It comes with a compiled calibration and simulation pipeline, a simulated-moments comparison of return mechanisms, and an out-of-sample volatility test on real data.
+
+**Findings.**
+- **Clustering, but no fat tails.** Feedback that lowers the temperature as volatility rises produces volatility clustering. Returns stay thin-tailed, because the magnetisation is bounded and two-humped.
+- **GARCH beats every spin mechanism.** Against 20 years of a 100-stock index (kurtosis 18.6, tail index 2.4), five return mechanisms from the literature score J = 175–215. An i.i.d. Gaussian scores 225. A GARCH(1,1)-t scores 15 and is the only model the index is a plausible draw from (p = 0.62).
+- **The limit is system size.** Even with 1,000 agents at their papers' settings, the published dynamics reach a kurtosis of 7.6 at most. A 100-stock network is both too small and too densely connected (87% of pairs).
+- **Breadth doesn't forecast volatility.** Market breadth, the data's own magnetisation, is significant in sample, but with the opposite sign to herding. It adds nothing out of sample over GJR-GARCH (Diebold–Mariano t = −0.96).
+
+![Tail distributions of each calibrated model against the 2005–2024 index](docs/figures/return_models/figR1_tails.png)
+
+**Next.** The return modelling is finished. The project now uses the model as a laboratory for early-warning signals of regime flips, ending in a pre-registered test on APAC index data (see [Next steps](#next-steps)).
+
 ## Status (October 2026)
 
 - The calibration pipeline runs end to end on real data from Yahoo Finance: 29 US large caps over 2005–2007, and 100 over 2005–2024.
