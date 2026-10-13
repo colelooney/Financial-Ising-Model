@@ -89,6 +89,17 @@ FAILURE_LABEL = {
 }
 
 
+def load_sectors(path):
+    """ticker,sector per line (a header line is skipped if its first field is 'ticker')."""
+    out = {}
+    for line in Path(path).read_text().splitlines():
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) < 2 or not parts[0] or parts[0].lower() == "ticker":
+            continue
+        out.setdefault(parts[1], []).append(parts[0])
+    return out
+
+
 def set_style():
     mpl.rcParams.update({
         "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
@@ -269,6 +280,7 @@ def compute(args, mode):
         sys.exit(f"J is {J.shape[0]}x{J.shape[0]} but the returns have {rets.shape[1]} tickers")
     out = Path(args.out)
     t_start = time.time()
+    mode = dict(mode, n_days=max(mode["n_days"], len(rets)))   # fig7 shows a data-length sample
     net = network_data(rets, J, args.threshold)
     print(f"{net['N']} stocks, {net['T']} days, lambda_max(J) = {net['lam']:.4f}")
 
@@ -377,9 +389,9 @@ def save(fig, out, name, formats):
 # Figures
 # ----------------------------------------------------------------------------------------------
 
-def sector_order(tickers, v1):
-    lookup = {t: s for s, ts in SECTORS.items() for t in ts}
-    names = list(SECTORS) + ["Other"]
+def sector_order(tickers, v1, sectors):
+    lookup = {t: s for s, ts in sectors.items() for t in ts}
+    names = list(sectors) + ["Other"]
     order = sorted(range(len(tickers)),
                    key=lambda i: (names.index(lookup.get(tickers[i], "Other")), -v1[i]))
     groups, start = [], 0
@@ -409,7 +421,8 @@ def fig_network(d):
 
     # (a) correlation heatmap, sectors grouped, cells below the threshold greyed out
     ax = fig.add_subplot(gs[:, 0])
-    order, groups = sector_order(tick, net["v1"])
+    order, groups = sector_order(tick, net["v1"], d.get("sectors", SECTORS))
+    many = N > 60  # too many stocks for readable ticker labels
     Co = C[np.ix_(order, order)]
     off = ~np.eye(N, dtype=bool)
     norm = Normalize(vmin=thr, vmax=Co[off].max())
@@ -422,15 +435,20 @@ def fig_network(d):
     for spine in ax.spines.values():
         spine.set_visible(False)
     labels = [tick[i] for i in order]
-    ax.set_xticks(range(N), labels, rotation=90, fontsize=7)
-    ax.set_yticks(range(N), labels, fontsize=7)
+    if many:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        ax.set_xticks(range(N), labels, rotation=90, fontsize=7)
+        ax.set_yticks(range(N), labels, fontsize=7)
     ax.tick_params(length=0)
     for name, a, b in groups:
         if a > 0:
-            ax.axhline(a - 0.5, color=SURFACE, lw=2)
-            ax.axvline(a - 0.5, color=SURFACE, lw=2)
-        ax.text((a + b - 1) / 2, -1.0, name, ha="center", va="bottom", fontsize=7.5,
-                color=INK2)
+            ax.axhline(a - 0.5, color=SURFACE, lw=2 if not many else 1)
+            ax.axvline(a - 0.5, color=SURFACE, lw=2 if not many else 1)
+        if b - a >= max(1, N / 30):  # label only blocks wide enough to hold a name
+            ax.text((a + b - 1) / 2, -0.03 * N, name, ha="center", va="bottom", fontsize=7.5,
+                    color=INK2)
     cb = fig.colorbar(ScalarMappable(norm, cmap), ax=ax, shrink=0.6, pad=0.02)
     cb.set_label(f"correlation, kept in J (grey: ≤ {thr}, dropped)", color=INK2)
     cb.outline.set_visible(False)
@@ -456,7 +474,11 @@ def fig_network(d):
     ax = fig.add_subplot(gs[1, 1])
     idx = np.argsort(net["v1"])
     ax.barh(range(N), net["v1"][idx], height=0.62, color=BLUE)
-    ax.set_yticks(range(N), [tick[i] for i in idx], fontsize=7)
+    if many:
+        ax.set_yticks([])
+        ax.set_ylabel(f"all {N} stocks, sorted")
+    else:
+        ax.set_yticks(range(N), [tick[i] for i in idx], fontsize=7)
     ax.tick_params(axis="y", length=0)
     ax.axvline(1 / np.sqrt(N), color=INK2, lw=0.9)
     ax.annotate("equal weight 1/√N", (1 / np.sqrt(N), 0), xytext=(4, -2),
@@ -943,6 +965,9 @@ def main():
     p.add_argument("--out", default="results/figures", help="output folder")
     p.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44])
     p.add_argument("--threshold", type=float, default=0.3, help="correlation cut-off used for J")
+    p.add_argument("--sectors", default=None,
+                   help="optional CSV of ticker,sector for ordering the heatmap (default: the "
+                        "built-in map of the 29 original stocks; others go to 'Other')")
     p.add_argument("--showcase-gain", type=float, default=0.5,
                    help="loop gain shown in the model-vs-data figure")
     p.add_argument("--quick", action="store_true", help="short runs to check the pipeline")
@@ -961,6 +986,9 @@ def main():
         if not Path(args.rets).exists():
             sys.exit(f"{args.rets} not found: run scripts/calibrate_real.py to freeze the data")
         d = compute(args, QUICK if args.quick else FULL)
+    if args.sectors:
+        d["sectors"] = load_sectors(args.sectors)
+    if not args.replot or args.sectors:
         with open(cache, "wb") as f:
             pickle.dump(d, f)
 

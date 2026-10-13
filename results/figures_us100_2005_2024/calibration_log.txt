@@ -1,0 +1,78 @@
+===== seed 42 =====
+
+Empirical mean daily vol: 0.0191
+Target vol:               0.0100
+lambda_max(J) = 9.0153
+Scanning T0 in [ 3.1554  3.52    3.9267  4.3804  4.8866  5.4512  6.0811  6.7838  7.5677
+  8.4422  9.4177 10.5059 11.7199]
+
+208 pilot runs completed.
+       T0  survivor first_failure   eps_ucb
+ 3.155353     False  equilibrated       NaN
+ 3.519959     False     zero_mean       NaN
+ 3.926695     False     zero_mean       NaN
+ 4.380430     False     zero_mean       NaN
+ 4.886595     False     zero_mean       NaN
+ 5.451249     False     zero_mean       NaN
+ 6.081148     False      thinning       NaN
+ 6.783834     False     converged       NaN
+ 7.567716      True          none -3.172419
+ 8.442177      True          none -2.445230
+ 9.417682     False  equilibrated       NaN
+10.505909     False   eps_defined       NaN
+11.719883     False  equilibrated       NaN
+
+Selected T0=7.5677 (i_T0=8), k=248, eps_ucb=-3.172
+
+===== seed 43 =====
+
+Empirical mean daily vol: 0.0191
+Target vol:               0.0100
+lambda_max(J) = 9.0153
+Scanning T0 in [ 3.1554  3.52    3.9267  4.3804  4.8866  5.4512  6.0811  6.7838  7.5677
+  8.4422  9.4177 10.5059 11.7199]
+
+208 pilot runs completed.
+       T0  survivor first_failure   eps_ucb
+ 3.155353     False     zero_mean       NaN
+ 3.519959     False     zero_mean       NaN
+ 3.926695     False     zero_mean       NaN
+ 4.380430     False     zero_mean       NaN
+ 4.886595     False     zero_mean       NaN
+ 5.451249     False     zero_mean       NaN
+ 6.081148     False  equilibrated       NaN
+ 6.783834     False     converged       NaN
+ 7.567716     False   eps_defined       NaN
+ 8.442177     False  equilibrated       NaN
+ 9.417682      True          none -2.154191
+10.505909      True          none -1.788485
+11.719883      True          none -1.502311
+
+Selected T0=9.4177 (i_T0=10), k=19, eps_ucb=-2.154
+
+===== seed 44 =====
+
+Empirical mean daily vol: 0.0191
+Target vol:               0.0100
+lambda_max(J) = 9.0153
+Scanning T0 in [ 3.1554  3.52    3.9267  4.3804  4.8866  5.4512  6.0811  6.7838  7.5677
+  8.4422  9.4177 10.5059 11.7199]
+
+208 pilot runs completed.
+       T0  survivor first_failure   eps_ucb
+ 3.155353     False  equilibrated       NaN
+ 3.519959     False  equilibrated       NaN
+ 3.926695     False     zero_mean       NaN
+ 4.380430     False     zero_mean       NaN
+ 4.886595     False     zero_mean       NaN
+ 5.451249     False     zero_mean       NaN
+ 6.081148     False     converged       NaN
+ 6.783834     False     converged       NaN
+ 7.567716      True          none -2.907333
+ 8.442177      True          none -2.740381
+ 9.417682      True          none -2.902469
+10.505909     False  equilibrated       NaN
+11.719883     False  equilibrated       NaN
+
+Selected T0=7.5677 (i_T0=8), k=258, eps_ucb=-2.907
+

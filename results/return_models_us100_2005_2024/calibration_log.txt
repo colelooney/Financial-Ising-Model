@@ -1,0 +1,24 @@
+cluster: grid J = 62.1, re-scored J = 98.3 at {'alpha': 0.8, 'a': 0.3, 'k': 496.0}
+cluster: grid J = 70.1, re-scored J = 99.7 at {'alpha': 1.6, 'a': 0.1, 'k': 496.0}
+cluster: grid J = 72.2, re-scored J = 66.3 at {'alpha': 1.2, 'a': 0.3, 'k': 496.0}
+cluster: chosen {'alpha': 1.2, 'a': 0.3, 'k': 496.0}
+cluster_stable: grid J = 58.7, re-scored J = 71.6 at {'alpha': 0.6, 'a': 0.15, 'k': 496.0}
+cluster_stable: grid J = 62.1, re-scored J = 98.3 at {'alpha': 0.8, 'a': 0.3, 'k': 496.0}
+cluster_stable: grid J = 65.6, re-scored J = 53.2 at {'alpha': 0.6, 'a': 0.2, 'k': 496.0}
+cluster_stable: chosen {'alpha': 0.6, 'a': 0.2, 'k': 496.0}
+level: grid J = 58.0, re-scored J = 168.9 at {'alpha': 0.55, 'k': 496.0}
+level: grid J = 74.5, re-scored J = 331.3 at {'alpha': 0.85, 'k': 496.0}
+level: grid J = 86.1, re-scored J = 118.9 at {'alpha': 1.0, 'k': 992.0}
+level: chosen {'alpha': 1.0, 'k': 992.0}
+change: grid J = 157.9, re-scored J = 150.0 at {'alpha': 0.4, 'k': 1.0}
+change: grid J = 221.7, re-scored J = 131.3 at {'alpha': 0.0, 'k': 1.0}
+change: grid J = 240.9, re-scored J = 220.4 at {'alpha': 0.0, 'k': 2.0}
+change: chosen {'alpha': 0.0, 'k': 1.0}
+bornholdt: grid J = 146.3, re-scored J = 207.6 at {'theta': 0.8, 'alpha_rel': 0.25}
+bornholdt: grid J = 183.3, re-scored J = 160.1 at {'theta': 0.8, 'alpha_rel': 0.5}
+bornholdt: grid J = 184.0, re-scored J = 177.6 at {'theta': 0.9, 'alpha_rel': 0.5}
+bornholdt: chosen {'theta': 0.8, 'alpha_rel': 0.5}
+krawiecki: grid J = 560.1, re-scored J = 402.5 at {'A': 1.2, 'h': 0.03}
+krawiecki: grid J = 591.2, re-scored J = 387.6 at {'A': 1.2, 'h': 0.1}
+krawiecki: grid J = 594.3, re-scored J = 395.7 at {'A': 1.2, 'h': 0.01}
+krawiecki: chosen {'A': 1.2, 'h': 0.1}

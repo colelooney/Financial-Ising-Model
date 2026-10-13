@@ -506,7 +506,7 @@ def fetch_market_data(tickers, start='2005-01-01', end='2008-01-01'):
                          auto_adjust=True, progress=False)['Close']
     
     # Drop any tickers that failed to download
-    prices = prices.dropna(axis=1, how='all')
+    prices = prices.loc[:, prices.notna().all()]
     valid_tickers = list(prices.columns)
     if len(valid_tickers) < len(tickers):
         dropped = set(tickers) - set(valid_tickers)

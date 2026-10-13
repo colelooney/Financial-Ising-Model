@@ -6,15 +6,16 @@ The repository contains the model, a calibration pipeline that picks the baselin
 
 ## Status (October 2026)
 
-- The calibration pipeline runs end to end on real data: 29 US large caps, 2005–2007, from Yahoo Finance.
+- The calibration pipeline runs end to end on real data from Yahoo Finance: 29 US large caps over 2005–2007, and 100 over 2005–2024.
 - The calibrated model with volatility feedback produces volatility clustering on the real network, but the original goal of reproducing fat tails is out of reach in this setup (see *Findings*).
-- Five other ways of turning spins into returns, taken from the literature, were compared against the index on the same network. None of them produces market-like tails on 29 stocks (see *Other ways to turn spins into returns*).
-- The figures below are reproduced by `scripts/make_figures.py` and `scripts/compare_return_models.py` from the frozen data.
+- Five other ways of turning spins into returns, taken from the literature, were compared against the index on the same network, on 29 stocks and then on 100 stocks over 20 years. None of them produces market-like tails, and a GARCH(1,1)-t beats all of them (see *Other ways to turn spins into returns*).
+- A direct test on the 100-stock data finds that market breadth, the data's own magnetisation, does not improve volatility forecasts out of sample (see *Does alignment predict volatility?*).
+- The figures below are reproduced by `scripts/make_figures.py`, `scripts/compare_return_models.py` and `scripts/garch_x_breadth.py` from the frozen data.
 - The project is moving toward **early-warning signals for regime flips**, using the model as a lab where every flip's timing and cause are known (see *Next steps*).
 
 ## Findings so far
 
-All figures come from the frozen 2005–2007 data for 29 stocks; temperatures are quoted as multiples of λ = λ_max(J).
+The first five subsections use the frozen 2005–2007 data for 29 stocks. The return-model comparison and the breadth test use 100 stocks over 2005–2024. Temperatures are quoted as multiples of λ = λ_max(J).
 
 ### The data: one market mode and two tight sectors
 
@@ -86,53 +87,83 @@ All figures come from the frozen 2005–2007 data for 29 stocks; temperatures ar
 ![Scorecard: each model's moments against the index's](docs/figures/figR3_scorecard.png)
 
 **The test.**
-- Five return mechanisms from the literature run on the same 29-stock network.
+- Five return mechanisms from the literature run on the same network.
 - Each is calibrated to the equal-weight index by the method of simulated moments (Franke & Westerhoff 2012):
-  - seven moments: E|z|, AC(r, 1), the Hill tail index, and AC(|r|) at lags 1, 5, 10 and 25;
-  - weighted by the inverse block-bootstrap covariance of the index's moments;
+  - nine moments: E|z|, AC(r, 1), the Hill tail index, and AC(|r|) at lags 1, 5, 10, 25, 50 and 100 (lags 50 and 100 only for targets of 2,500 days or more);
+  - each weighted by its own block-bootstrap variance, with blocks of 251 days (a twentieth of the sample);
   - two-stage grid search: the best three grid points are re-scored on longer runs.
 - Four more moments are held out: kurtosis, 5-day kurtosis, P(|z| > 3) and AC(r², 1).
 - Two yardsticks: a GARCH(1,1)-t fitted by maximum likelihood, and an i.i.d. Gaussian.
 
+**The data.** 100 US large caps, 2005–2024 (5,032 days; `universes/tickers_us_large_cap.csv`). The index has kurtosis 18.6 and a Hill index of 2.4 ± 0.4. J keeps 4,301 of 4,950 pairs (87%) at the 0.3 threshold, with λ_max(J) = 9.02. The calibration picks T0 = 0.839 λ in two of three seeds, with k = 248 sweeps a day and ε = −3.18. So the feedback is linearly stable only for α < 0.31. At that T0, m is two-humped (Binder ratio 1.26).
+
 | rank | model | mechanism | J | p |
 |---|---|---|---|---|
-| 1 | GARCH(1,1)-t | statistical benchmark, 4 parameters fitted by maximum likelihood (Bollerslev 1986, 1987) | 25 | 0.16 |
-| 2 | Gaussian i.i.d. | null model, no parameters | 35 | 0.005 |
-| 3 | Bornholdt frustration | global minority-type coupling −α_B s_i \|M\|, r = ΔM (Bornholdt 2001; Kaizoji et al. 2002) | 49 | 0.06 |
-| 4 | Change, r = Δm | market clearing against fundamentalists (Kaizoji et al. 2002) on our dynamics, 1 sweep a day | 62 | < 0.003 |
-| 5 | Cluster trading, stable feedback | Cont & Bouchaud (2000) activity on Fortuin–Kasteleyn clusters (our combination) | 77 | 0.007 |
-| 6 | Cluster trading | the same with stronger feedback; T drifts to 3.1 T0 | 104 | 0.54 |
-| 7 | Random couplings | Krawiecki, Hołyst & Helbing (2002) | 114 | < 0.003 |
-| 8 | Level, r = m (current) | excess demand moves the price | 141 | 0.05 |
+| 1 | GARCH(1,1)-t | statistical benchmark, 4 parameters fitted by maximum likelihood (Bollerslev 1986, 1987) | 15 | 0.62 |
+| 2 | Random couplings | Krawiecki, Hołyst & Helbing (2002) | 175 | < 0.025 |
+| 3 | Change, r = Δm | market clearing against fundamentalists (Kaizoji et al. 2002) on our dynamics, 1 sweep a day | 184 | < 0.025 |
+| 4 | Bornholdt frustration | global minority-type coupling −α_B s_i \|M\|, r = ΔM (Bornholdt 2001; Kaizoji et al. 2002) | 185 | < 0.025 |
+| 5 | Level, r = m (current) | excess demand moves the price; T drifts to 5.4 T0 | 211 | < 0.025 |
+| 6 | Cluster trading | Cont & Bouchaud (2000) activity on Fortuin–Kasteleyn clusters (our combination); T drifts to 7.8 T0 | 214 | < 0.025 |
+| 7 | Cluster trading, α ≤ 0.8 | the same with weaker feedback; T drifts to 2.4 T0 | 215 | < 0.025 |
+| 8 | Gaussian i.i.d. | null model, no parameters | 225 | < 0.025 |
 
 **Reading the table.**
 - **J** is the weighted distance from the index's moments; lower is better.
-- **p** is the share of model samples of the index's length that sit further from the model's own long-run moments than the index does. A high p means the index is a plausible draw from the model. A model whose moments vary a lot between samples, like the runaway cluster model, can have a high p and a high J at once.
-- Full tables are written to `results/return_models/return_models.md`.
+- **p** is the share of model samples of the index's length that sit further from the model's own long-run moments than the index does. A high p means the index is a plausible draw from the model. The run used `--quick` (40 samples per model), so p < 0.025 means none of them did.
+- The run was calibrated with the earlier weighting (the inverse of the full bootstrap covariance) and re-scored with each moment's own variance (`--replot --weights diag`). The parameters are the ones chosen under the earlier weighting.
+- Full tables are written to `results/return_models_us100/rescored_diag/return_models.md`.
 
 **What it shows.**
-- **No spin mechanism beats an i.i.d. Gaussian at N = 29.** The current level mapping comes last. Its returns are bounded and two-humped, which puts E|z| and the Hill index each about 9 standard errors from the index.
-- **Bornholdt's frustration dynamics is the best mechanism.** It matches the negative lag-1 autocorrelation (−0.12 vs −0.10) and gets the tail index within 2 standard errors (5.5 vs 3.9), but has no clustering beyond lag 1.
-- **Cluster trading only gets fat tails by running away.** With feedback strong enough to cluster, T settles at 3.1 T0 and the tails become too fat (Hill 2.2, kurtosis 11.5). With the feedback kept stable, its tails are thin (Hill 8.7).
-- **GARCH fits best, but it has no mechanism.** It also overshoots kurtosis (6.4 vs 4.7) and 5-day kurtosis (5.7 vs 3.1), and misses the negative lag-1 autocorrelation.
+- **Only GARCH survives.** It is the one model the index is a plausible draw from (p = 0.62). It matches 8 of the 9 fitted moments within 1.2 standard errors, including AC(|r|) out to lag 100, with a + b = 0.992. It misses the negative lag-1 autocorrelation (0.01 vs −0.11) and overshoots kurtosis (37 vs 18.6) and 5-day kurtosis (42 vs 13).
+- **No spin mechanism does much better than an i.i.d. Gaussian.** Their J ranges from 175 to 215, against 225 for the Gaussian. Their Hill indices are 5.2–6.2 against the index's 2.4, and kurtosis stays at or below 3.7. From lag 5 on, their AC(|r|) is at most 0.03, against 0.40 for the index.
+- **Both r = ΔM mappings match the negative lag-1 autocorrelation:** −0.10 (change) and −0.09 (Bornholdt) against −0.11, as Bornholdt's did on 29 stocks.
+- **Random couplings cluster for a day or two.** AC(|r|) at lag 1 is 0.25 against the index's 0.39, but it is gone by lag 5.
+- **The level and cluster mappings ran away.** Their α grid was sized for the 29-stock ε of −1.19. Here the calibrated α of 1.0 and 1.2 means a loop gain G of 3.2 and 3.8, so T settles at 5.4 and 7.8 T0. Deep in the disordered phase, the returns are Gaussian (kurtosis 3.0). `compare_return_models.py` now sets these grids in G = α|ε| instead, but these three models haven't been rerun on 100 stocks.
+- **The weighting matters on a long target.** With the full-covariance weighting, the level mapping ranks first (J = 112, against 116 for GARCH), even though it misses all nine moments by 2 to 8 standard errors. The nine moments' bootstrap correlation matrix has condition number 1,299, and one direction (calm against turbulent resamples) carries 72% of the variance. A model that misses along that direction is barely penalised. On 29 stocks the condition number is 19.
+
+**On 29 stocks** (2005–2007, 753 days) the ranking is similar under either weighting: GARCH first and the level mapping last. Bornholdt's dynamics was the best mechanism there, with the tail index within 2 standard errors (5.5 vs 3.9). Cluster trading only got fat tails by running away (Hill 2.2, kurtosis 11.5 at T = 3.1 T0).
 
 ![The published mechanisms need many agents, and Bornholdt's also needs local structure](docs/figures/figR5_scaling.png)
 
 **Why the spin models fall short: system size and network structure.** Run at their papers' settings, both published dynamics reproduce the papers at their own scale:
-- Random couplings reach a Hill index of 2.9 at N = 1000; the paper's analytic value is 2.89.
-- Bornholdt's lattice model reaches a Hill index of 4.0 and AC(|r|) ≈ 0.2 at lag 10 with N = 1024.
+- Random couplings reach a Hill index of 2.9–3.1 at N = 1000; the paper's analytic value is 2.89.
+- Bornholdt's lattice model reaches a Hill index of about 4 and AC(|r|) ≈ 0.2 at lag 10 with N = 1024.
 
-Both effects fade as N shrinks towards 29. Bornholdt's clustering also disappears on an all-to-all network, even at N = 1024. A 29-stock network with half of all pairs connected is both small and close to all-to-all.
+Both effects fade as N shrinks. Bornholdt's clustering also disappears on an all-to-all network, even at N = 1024. The 100-stock network is both small and close to all-to-all (87% of pairs connected). Even at N = 1000, the published dynamics reach kurtosis 7.6 at most, against 18.6 for the 2005–2024 index.
 
 More figures: [tail distributions](docs/figures/figR1_tails.png), [AC(|r|) by model](docs/figures/figR2_clustering.png), [sample paths](docs/figures/figR4_paths.png).
 
-**Caveat on the target.** The index is short (753 days) and includes one regime shift. Without the second half of 2007:
-- AC(|r|) at lags 5 and 10 roughly halves (0.15 → 0.09 and 0.13 → 0.07);
-- the Hill index rises from 3.9 to 4.9.
-
-A longer index series, passed with `--target-csv`, would make the comparison sharper.
+**Caveats.** The index's tails come mostly from 2008 and 2020. The universe has survivorship bias: every stock in it is still listed today.
 
 **Not tested:** threshold (three-state) traders (Iori 2002). Their fat tails rely on trade frictions and a volume-dependent price impact, which would need cash and inventory accounting this model doesn't have.
+
+### Does alignment predict volatility?
+
+![Breadth and index volatility, and the baseline model's forecast errors by breadth](docs/figures/garch_x.png)
+
+In the model, aligned spins mean herding. In the data, each stock's spin on a given day can be read as the sign of its return. The magnetisation m is then market breadth: the share of stocks up minus the share down.
+
+**The test** (`scripts/garch_x_breadth.py`) asks whether yesterday's m² predicts the variance of the 100-stock equal-weight index, once a standard volatility model is already in place:
+- **Baseline:** GJR-GARCH(1,1) with Student-t innovations and an AR(1) mean. GJR lets volatility rise more after falls (Glosten, Jagannathan & Runkle 1993).
+- **Added terms:** γ m² from the previous day in the variance equation and, separately, δ times a robust cross-sectional dispersion D.
+- **The main test is breadth given dispersion.** An equal-weight index of N stocks keeps some stock-specific risk, which rises with dispersion, and low breadth partly measures that. On simulated panels where breadth had no effect, breadth on its own came out significant in 12% of runs at the 5% level. Given dispersion, the rate was 5%, and a real effect of γ = 0.15 was found in 92% of runs.
+- **In sample:** likelihood-ratio and robust (sandwich) Wald tests.
+- **Out of sample:** fitted on 2005–2014, with one-day variance forecasts over 2015–2024 compared by QLIKE loss (Patton 2011) and a Diebold–Mariano test with Newey–West standard errors.
+
+| question | in sample | out of sample: QLIKE gain (DM t) |
+|---|---|---|
+| breadth alone | γ = −0.124, LR = 23.8 (p < 0.001) | −0.011 (−1.44) |
+| dispersion alone | δ = 0.028, LR = 29.5 (p < 0.001) | −0.005 (−0.51) |
+| breadth given dispersion | γ = −0.068, robust z = −2.66, LR = 7.2 (p = 0.007) | −0.006 (−0.96) |
+| asymmetry g (sanity check) | LR = 131 | +0.023 (2.03, p = 0.04) |
+
+A positive gain means the larger model forecasts better.
+
+**What it shows.**
+- **In sample, breadth matters even given dispersion, but with the opposite sign to herding.** After strongly aligned days, variance is lower than GJR predicts. The baseline's forecast errors show it directly: on the tenth of days with the highest m², realised variance averages 0.78 of the forecast (standard error 0.09). One standard deviation of m² lowers next-day variance by about 3% of its median (5% without the dispersion term).
+- **A likely reading:** m² is close to 1 after big moves, so a negative γ softens GJR's quadratic response to large shocks. That is a correction to the shape of the news-impact curve, not evidence about herding.
+- **Out of sample, neither breadth nor dispersion helps.** Both make the forecasts slightly worse, though not significantly. The asymmetry term, by contrast, does improve them (DM t = 2.03). So breadth carries no usable information about next-day volatility beyond a standard volatility model.
 
 ## Repository layout
 
@@ -142,6 +173,9 @@ scripts/calibrate_real.py   downloads the data once, freezes it in data/, calibr
 scripts/make_figures.py     the figures and numbers summary used in this README
 scripts/compare_return_models.py   the return-model comparison (figures figR1-figR5, tables)
 scripts/k_under_feedback.py        the check of the clock k under feedback
+scripts/garch_x_breadth.py  the breadth test: does alignment predict index volatility?
+scripts/freeze_data.py      downloads, cleans and freezes a larger ticker universe
+universes/tickers_us_large_cap.csv  202 US large caps in 11 sectors (101 marked core)
 docs/figures/               committed copies of the figures
 pyproject.toml, uv.lock     dependencies (managed with uv)
 ```
@@ -172,10 +206,29 @@ The command-line flags (`--mode`, `--alpha`, …) are parsed but not used yet.
 uv run python scripts/calibrate_real.py   # once: download, freeze data/, calibrate seeds 42-44
 uv run python scripts/make_figures.py     # about a minute: results/figures/*.png and summary.md
 uv run python scripts/compare_return_models.py   # about 5 minutes: results/return_models/
-mkdir -p docs/figures && cp results/figures/fig*.png results/return_models/figR*.png docs/figures/
+mkdir -p docs/figures && cp results/figures/fig*.png docs/figures/
 ```
 
 `make_figures.py` reruns the calibration for seeds 42–44 and picks the row that passes in the most seeds. It then runs the deployed model at seven loop gains (4 runs × 10,000 days each). `compare_return_models.py` reads that run's `figdata.pkl` (network, recommended row and the index) and needs no download. Both scripts accept `--quick` for shorter runs to check the pipeline, and `--replot` to redraw from the saved numbers without simulating.
+
+### A larger, longer dataset
+
+The 29-stock, three-year sample is too small to separate the return models. Its tail index has a bootstrap standard error of about 0.8, and the network is too small for the published mechanisms to produce fat tails. `universes/tickers_us_large_cap.csv` lists 202 US large caps in the 11 GICS sectors (8 to 22 per sector), all listed since before 2005 and still listed. The 101 marked `core` are a smaller subset with 6 to 10 per sector. A sample from 2005 to 2024 has about 5,000 days and covers 2008, 2011, 2020 and 2022. On the core list it cut the tail index's standard error from about 0.8 to 0.44. EQR returned no data (Equity Residential is merging with AvalonBay), so the run in this README has 100 stocks.
+
+```bash
+uv run python scripts/freeze_data.py --core-only          # data/rets_us100_2005_2024.pkl etc.
+uv run python scripts/make_figures.py --rets data/rets_us100_2005_2024.pkl \
+    --J data/J_us100_2005_2024.npy --sectors data/sectors_us100_2005_2024.csv \
+    --out results/figures_us100
+uv run python scripts/compare_return_models.py --figdata results/figures_us100/figdata.pkl \
+    --out results/return_models_us100 --quick --jobs 4
+uv run python scripts/compare_return_models.py --out results/return_models_us100 --replot \
+    --weights diag                                        # re-score a run made with --weights full
+uv run python scripts/garch_x_breadth.py --rets data/rets_us100_2005_2024.pkl   # about 20 s
+cp results/return_models_us100/rescored_diag/figR*.png results/garch_x/garch_x.png docs/figures/
+```
+
+`freeze_data.py` drops tickers that start late, end early or have gaps, forward-fills gaps of up to 3 days, and lists every single-day move above 25% in `data/outliers_<tag>.csv`. Check that list for spin-offs Yahoo didn't adjust. It writes a report, `data/freeze_<tag>.txt`, with network density at several thresholds. The tag in the file names is the number of tickers kept, so it can differ from 101. For targets of 2,500 days or more, `compare_return_models.py` also fits AC(|r|) at lags 50 and 100, and uses bootstrap blocks of a twentieth of the sample. It prints a run-time estimate before it starts. Run time grows with N² and with the calibrated clock k. On 100 stocks, k = 248 sweeps a day, and the `--quick` comparison took 13 hours. `--jobs` runs models in parallel processes, and `--add` adds models to an existing run, e.g. to run the slow ones later. `--weights full` uses the inverse of the full bootstrap covariance instead of each moment's own variance. With `--replot`, `--weights` re-scores a saved run without re-calibrating. `make_figures.py` builds J at `--threshold` when the `--J` file doesn't exist yet, and stops if an existing J was built at a different threshold. The list has survivorship bias: every stock in it is still listed today.
 
 ## Using the model from Python
 
@@ -214,7 +267,8 @@ if cal["T0"] is not None:
 - **The equilibration check is noisy.** It compares 8 runs against 8 with a 2σ test and falsely fails about 30% of well-mixed rows. Together with the flat ε near its optimum, this is why the selected T0 depends on the seed.
 - **No fat tails.** Returns ∝ m are bounded (about ±2.3 standard deviations at the selected T0) and two-humped (see *Findings*).
 - **Feedback artefacts.** Clustering comes with positive lag-1 return autocorrelation unless k is re-chosen under feedback, and its memory stops at the 20-day window.
-- **A short comparison target.** The return models are compared against one 753-day index that includes the 2007 regime shift.
+- **The 100-stock comparison ran with the old settings.** It was calibrated with the full-covariance weighting and an α grid sized for the 29-stock network, so the level and cluster mappings were calibrated with runaway feedback. The scripts now default to diagonal weighting and loop-gain grids. Those three models need a rerun, which takes about 13 hours at k = 248.
+- **Survivorship bias.** Every stock in the 100-stock universe is still listed today.
 - **numba cache.** The on-disk cache is tied to the name the module was imported under. If you import `model.py` both as a top-level `model` and as `ising_market.model`, you'll get `ModuleNotFoundError: No module named 'model'`. Delete the `*.nbi` and `*.nbc` files under `src/` (`find src \( -name "*.nbi" -o -name "*.nbc" \) -delete`), or set `cache=False` (compiling costs under a second per kernel).
 - **Unfinished pieces of the old code:**
   - the CLI flags do nothing yet;
@@ -256,6 +310,7 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 - Fix the equilibration test: a Bonferroni threshold across its three statistics, or more seeds per start.
 - Under feedback, use k = 36 (twice the calibrated clock) for G ≤ 0.75, or re-derive k from τ_int measured under feedback.
 - Replace the 20-day volatility window with an EWMA or several windows, so the clustering decays instead of stopping at 20 days.
+- Rerun the level and cluster mappings on 100 stocks with the loop-gain grid.
 - Compare the model with the index both with and without the second half of 2007.
 - Add pytest tests: bit-identical pilots, FFT autocorrelation matching the direct method, and a seed-pinned calibration snapshot.
 - Set `cache=False` on the numba kernels, wire up the CLI, update the `plot_*` helpers, and calibrate κ against index volatility.
@@ -266,7 +321,6 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 - Model crashes as avalanches in a driven random-field Ising model, which is a known route to heavy tails.
 - Use a kinetic (asymmetric) Ising model to study directed influence across APAC time zones.
 - Run Bornholdt's frustration dynamics on a sparse network of a larger universe, such as a minimum spanning tree (Mantegna 1999) or a planar maximally filtered graph (Tumminello et al. 2005). That gives it both ingredients it needs: many agents and local structure.
-- Repeat the return-model comparison against a long index series, e.g. 20 years of daily data.
 
 ## References
 
@@ -286,10 +340,14 @@ First concrete steps: load the frozen J; re-pick the pilot temperatures on the r
 - Hill, B. M. (1975). A simple general approach to inference about the tail of a distribution. *Ann. Statist.* 3(5), 1163–1174.
 - Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity. *J. Econometrics* 31(3), 307–327.
 - Bollerslev, T. (1987). A conditionally heteroskedastic time series model for speculative prices and rates of return. *Rev. Econ. Stat.* 69(3), 542–547.
+- Glosten, L. R., Jagannathan, R. & Runkle, D. E. (1993). On the relation between the expected value and the volatility of the nominal excess return on stocks. *J. Finance* 48(5), 1779–1801.
+- Patton, A. J. (2011). Volatility forecast comparison using imperfect volatility proxies. *J. Econometrics* 160(1), 246–256.
+- Diebold, F. X. & Mariano, R. S. (1995). Comparing predictive accuracy. *J. Bus. Econ. Stat.* 13(3), 253–263.
+- Newey, W. K. & West, K. D. (1987). A simple, positive semi-definite, heteroskedasticity and autocorrelation consistent covariance matrix. *Econometrica* 55(3), 703–708.
 - Iori, G. (2002). A microsimulation of traders activity in the stock market: the role of heterogeneity, agents' interactions and trade frictions. *J. Econ. Behav. Organ.* 49(2), 269–285.
 - Mantegna, R. N. (1999). Hierarchical structure in financial markets. *Eur. Phys. J. B* 11, 193–197.
 - Tumminello, M., Aste, T., Di Matteo, T. & Mantegna, R. N. (2005). A tool for filtering information in complex systems. *PNAS* 102(30), 10421–10426.
 
 ---
 
-<sub>**AI assistance.** A main learning goal of this project was how to effectively use AI in a research project. This project used Claude (Anthropic) as a research assistant. Claude reviewed the calibration code, identified the statistical issues described above, ran diagnostic simulations on a synthetic test network, researched and implemented the return-model comparison and ran it on the author's frozen data, and drafted code changes, the figure scripts and documentation. The author reviewed and applied every change, ran the verification checks, the real-data calibration and the figures, and is responsible for the code and conclusions.</sub>
+<sub>**AI assistance.** This project used Claude (Anthropic) as a research assistant. Claude reviewed the calibration code, identified the statistical issues described above, ran diagnostic simulations on a synthetic test network, researched and implemented the return-model comparison and ran it on the author's frozen data, designed the breadth test and checked it on simulated data, and drafted code changes, the figure scripts and documentation. The author reviewed and applied every change, ran the verification checks, the real-data calibrations, the 100-stock comparison, the breadth test and the figures, and is responsible for the code and conclusions.</sub>
