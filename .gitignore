@@ -16,5 +16,5 @@ __pycache__/
 data/
 # results/
 patches/
-tests/
+/stylized_facts/tests/
 ising_handover/
