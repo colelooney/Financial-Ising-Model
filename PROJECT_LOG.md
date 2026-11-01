@@ -305,3 +305,57 @@ Tool: Claude Code (desktop app). Nothing committed.
 
 - Where `data/rets_2005_2007.pkl` and `data/J_2005_2007.npy` came from is unknown. `REPORT.md` says `calibrate_real.py` freezes the data, but its code writes `rets_big.pkl` and `J_big.npy`.
 - `stylized_facts/README.md` known limits: still for the owner to fill in.
+
+---
+
+## 2026-10-31: Add symbols, settings and parameters to `stylized_facts/README.md`
+
+Tool: Claude Code (desktop app). Nothing committed.
+
+### Prompt
+
+> Features are missing, for instance epsilon should be explained, any non-trivial feature or symbol that has physical/model meaning should be included in this README.md. Review the repo again and determine which additional features impact the model's behaviour and update the README.md to include these features.
+
+### Steps
+
+1. Read `model.py` lines 499–830 in full: `fetch_market_data`, `build_empirical_J`, `_metropolis_pilot`, `_run_pilot`, `_acf`, the run-quality constants, `thinned_stats`, `compute_run_stats`, `aggregate_by_T0` (including the ε regression) and `select_T0`.
+2. Read `compare_return_models.py` lines 60–566: run-length settings, moment lists, the `MODELS` grids, all three spin kernels, `Context.sigma0`, `simulate`, `grid_points`, the GARCH fit, `hill`, `moments`, `block_bootstrap`, `j_stat`, `calibrate`, `evaluate`, `coverage`, `scaling_checks`.
+3. Read from `make_figures.py`: `FULL`/`QUICK`, `GAINS`, `classify` (regimes), `network_data` (noise edge), `run_calibrations`, `consensus_row`, `run_deployment`. Read from `garch_x_breadth.py`: `MODELS`, `TESTS`, `panel_inputs`, `newey_west_t`, `out_of_sample`.
+4. Inserted five new sections into `stylized_facts/README.md`, before *Gaps found*:
+   - *Symbols and quantities: network and dynamics* (21 rows)
+   - *ε: the elasticity of volatility with respect to temperature* (definition, measurement, sign, link to the loop gain G, use in selection)
+   - *Calibration statistics* (11 rows: σ_m, R, q, τ_int, converged, n_eff, z, s, AC1, equilibrated, regime)
+   - *Settings that change the model's behaviour* (20 rows, with defaults and effects)
+   - *Return-model comparison: parameters and statistics* (23 rows) and *Breadth test: symbols* (14 rows)
+5. Corrected the earlier comparison row: the code has six spin-model variants (including `cluster_stable`), not five.
+6. Removed five phrases from the draft that went beyond the code: a typical Hill index for real equity, how a affects tails, a loose description of Bornholdt's term, a claim about pilot length, and which figures use regime shading.
+
+### Commands run
+
+| Command | Output |
+|---|---|
+| `sed -n 499,830p src/ising_market/model.py` | Calibration internals (source of the ε, Sokal, z and selection rows) |
+| `sed -n 60,566p scripts/compare_return_models.py` (in parts) | Settings, grids, kernels, moments and scoring |
+| `grep` in `make_figures.py` for `GAINS`, `FULL`, `classify`, `mp_edge`, `consensus_row` | `GAINS = (0.0 … 1.5)`; `FULL` 50,000 / 10,000 / 10,000 days / 4 runs; noise edge `(1 + √(N/T))²` |
+| `sed`/`grep` in `garch_x_breadth.py` | Five GARCH variants, five tests, D = (1.4826·MAD)², Newey–West lag ⌊4(n/100)^(2/9)⌋ |
+| `grep HILL_CAP\|LONG_TARGET\|BLOCK_MIN` | 30.0, 2,500, 50: match the README |
+| `awk` column count per README section | Every table has the same number of columns in all its rows |
+
+### Decisions
+
+| ID | Decision | Alternatives considered | Why | Decided by |
+|---|---|---|---|---|
+| D1 | Give ε its own subsection, with the loop-gain reasoning written out. | One table row like the other symbols. | ε controls which T0 is chosen and how every feedback strength is set (α = G/\|ε\|); one row can't hold that. | Claude (prompted by the owner's example) |
+| D2 | Separate symbols (what a quantity is) from settings (the default values that change behaviour). | One combined table. | Settings carry defaults and effects; symbols carry definitions and meanings. | Claude |
+| D3 | Include the comparison and breadth-test parameters. | Only the core model. | They change what each model does and how it is judged. | Claude |
+| D4 | Only state what the code defines or computes; leave out typical market values and interpretations not in the code. | Keep explanatory context from general knowledge. | CLAUDE.md: don't claim results or findings the code hasn't produced. | Claude |
+
+### Files changed
+
+- `stylized_facts/README.md` (5 sections inserted; 1 row corrected; status line and placeholder unchanged)
+- `PROJECT_LOG.md` (this entry)
+
+### Open items
+
+- The name `fig3_griffiths` isn't explained in the code. The README quotes the code's description instead of guessing.
+- The feedback's σ is computed from m in `model.py` but from daily returns in `compare_return_models.py`. The two are the same only for the `level` mapping. The README notes this; whether it was intended isn't recorded.
