@@ -419,3 +419,41 @@ Not covered: `aggregate_by_T0`, `calibrate_parameters`, the legacy `FinancialIsi
 
 - `stylized_facts/tests/` is git-ignored (`.gitignore` line 19), so the new file won't show in `git status` or be committed unless that rule changes.
 - `loose_tests.py` doesn't match pytest's `test_*.py` pattern and the root `testpaths = ["tests"]` doesn't point at it; it only runs when its path is passed explicitly.
+
+## 2026-11-01: Review of stylized_facts/
+
+### Prompt
+
+Review stylized_facts/ and identify breaking points, edge cases, known comparisons (statistical functions with known solutions) and dependency requirements, in the code and in the broader model concept. Ignore tests/test_loose.py.
+
+### Steps
+
+1. Read `src/ising_market/model.py` in full, all six scripts (the statistics and kernel parts of `compare_return_models.py`, `make_figures.py` and `garch_x_breadth.py`), `pyproject.toml`, `uv.lock` and REPORT.md's "Known limitations".
+2. Wrote the findings as a plan, which was approved, then saved them as `stylized_facts/REVIEW.md`.
+
+### Commands run (all read-only)
+
+| Command | Output |
+|---|---|
+| `git ls-files stylized_facts`, `wc -l` | 6 scripts, `model.py` 1,143 lines |
+| `uv pip list` | numpy 2.5.3, numba 0.67.0, pandas 3.0.6, scipy 1.18.1, matplotlib 3.11.2, yfinance 1.7.0 |
+| `grep strict=True` | `zip(..., strict=True)` in three scripts, so Python ≥ 3.10 is needed despite `requires-python = ">=3.9"` |
+| `head data/freeze_us100_2005_2024.txt` | 0 isolated stocks at threshold 0.3, 6 at 0.5, 36 at 0.6 |
+
+### Findings (summary; details in stylized_facts/REVIEW.md)
+
+- Silent errors: the equilibration check passes vacuously with one seed per start; `consensus_row` uses σ0 and ε measured at each seed's own k with the median k; J's diagonal and symmetry are never checked; isolated nodes flip on every attempt.
+- Crashes: J with no edges (λ = 0), `T0=None` passed on to `simulate_deployed`, short pilots, τ_int ≤ 0 giving thinning k ≤ 0, degenerate ε fits, short series in `moments`/`hill`/`block_bootstrap`.
+- Known comparisons listed for the kernels (J = 0, exact enumeration, Curie–Weiss, Onsager, 1D ring, pilot vs deploy bit-identity at α = 0) and the statistics (ACF, τ_int, Binder, kurtosis, Hill, GARCH, Newey–West, Marchenko–Pastur).
+- Dependencies: wrong `requires-python`, pandas 3 vs pickled DataFrames, numba–numpy coupling, yfinance imported by the package core.
+
+None of these were confirmed by running code.
+
+### Files changed
+
+- `stylized_facts/REVIEW.md` (new)
+- `PROJECT_LOG.md` (this entry)
+
+### Open items
+
+- Turn section C of REVIEW.md into tests (`stylized_facts/tests/test_known_solutions.py`) and confirm or rule out the section A items.
