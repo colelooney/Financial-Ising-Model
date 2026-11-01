@@ -359,3 +359,63 @@ Tool: Claude Code (desktop app). Nothing committed.
 
 - The name `fig3_griffiths` isn't explained in the code. The README quotes the code's description instead of guessing.
 - The feedback's σ is computed from m in `model.py` but from daily returns in `compare_return_models.py`. The two are the same only for the `level` mapping. The README notes this; whether it was intended isn't recorded.
+
+---
+
+## 2026-11-01: Loose pytest tests for the stylized_facts model
+
+Tool: Claude Code (desktop app). Nothing committed.
+
+### Context (owner's note)
+
+This section is a practice section with learning how to be specific in prompt. Lack of tests was a known open area so I will address this is two separate ways. First, I will prompt a simply "add tests ..." without any specification, this will be in a separate file. The next prompt will be more specific and utilize plan mode to identify weakpoints in the code before prompting for specific tests.
+
+### Prompt
+
+> add some pytest tests for the stylized facts model in stylized_facts/tests/loose_tests.py
+
+### Steps
+
+1. Read `model.py` lines 1–22 (imports, `results/figures` side effect) and 515–968 (`build_empirical_J` through `stylised_facts`).
+2. Wrote `stylized_facts/tests/loose_tests.py`: 20 tests on synthetic, seeded inputs (a 10-spin uniform ferromagnet and two blocks of correlated fake returns). No downloads, no frozen data.
+3. Ran the tests and ruff.
+
+### What the tests cover
+
+| Function | Checks |
+|---|---|
+| `build_empirical_J` | shape, symmetry, zero diagonal, mean non-zero coupling = 0.1, threshold keeps C > 0.3 and drops cross-block edges |
+| `_acf` | lag 0 = 1; matches `np.correlate` |
+| `mean_se`, `thinned_stats` | hand values; white-noise AC1 ≈ 0; NaN std when the series is shorter than the window |
+| `compute_run_stats` | Gaussian noise: R ≈ 3, τ_int ≈ 0.5, converged; AR(1) φ = 0.9: τ_int ≈ 9.5 (±25%) |
+| `_run_pilot` | same seed → same output; bad `start` raises; 0.2λ stays ordered, 5λ disordered |
+| `select_T0` | picks the most negative ε_ucb; rejects ε > 0; no survivors → `None`; missing columns → `KeyError` |
+| `simulate_deployed` | same seed → same output; r = κ·m; α = 0 keeps T = T0 with no clipping; T stays inside `T_clip` |
+| `stylised_facts` | Gaussian: kurtosis ≈ 3, AC ≈ 0; Student-t(4): kurtosis > 4, fitted dof in 2.5–6 |
+
+Not covered: `aggregate_by_T0`, `calibrate_parameters`, the legacy `FinancialIsingModel` class, plotting, and the scripts.
+
+### Commands run
+
+| Command | Output |
+|---|---|
+| `uv run python -c "import pytest, ising_market.model"` | pytest 9.1.1; package imports from `stylized_facts/src` |
+| `uv run pytest stylized_facts/tests/loose_tests.py -q` | 20 passed in 2.57 s |
+| `uv run ruff check stylized_facts/tests/loose_tests.py` | All checks passed |
+
+### Decisions
+
+| ID | Decision | Why | Decided by |
+|---|---|---|---|
+| D1 | Import `model.py` inside a temp directory (module fixture). | Importing it creates `results/figures/` in the working directory. | Claude |
+| D2 | Synthetic inputs only, small N and short runs. | Fast (< 3 s), seeded, no network or git-ignored data needed. | Claude |
+
+### Files changed
+
+- `stylized_facts/tests/loose_tests.py` (new)
+- `PROJECT_LOG.md` (this entry)
+
+### Open items
+
+- `stylized_facts/tests/` is git-ignored (`.gitignore` line 19), so the new file won't show in `git status` or be committed unless that rule changes.
+- `loose_tests.py` doesn't match pytest's `test_*.py` pattern and the root `testpaths = ["tests"]` doesn't point at it; it only runs when its path is passed explicitly.
