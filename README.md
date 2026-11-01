@@ -19,3 +19,18 @@ General AI prompts, including for discussion and review, can be found in PROJECT
 **[`early_warning/`](early_warning/)**: early warning signals in the financial Ising model. Status: not started; goal to be written. It does not depend on `stylized_facts/`.
 
 Every working session is recorded in [PROJECT_LOG.md](PROJECT_LOG.md): prompts, steps, decisions and checks.
+
+## Module 1 - Task Specification
+This module was learning how to construct Claude and Claude Code prompts with these guidelines in mind:
+- State what's known and unknown separately. Don't let Claude infer your data availability, budget, or constraints — say them, or it will guess and you won't know it guessed.
+- Force assumption-flagging. Explicitly instruct: "flag every assumption you make instead of picking one silently." This is the exact discipline you already wrote into the Kalshi engine's scope — make it a reusable habit, not a one-off.
+- Give the shape of a good and bad answer. One example of the output format you want (and one of what you don't want) does more than a paragraph of adjectives.
+- Separate instructions from data. Wrap pasted code, data, or context in clear delimiters so Claude doesn't conflate your instructions with the material it's operating on.
+
+Given that at this stage pytest's for the calibration pipeline were unwritten, they were used as a lab exercise for practice.
+
+Two stages were compared: loose prompt and specified prompt
+
+The loose prompt, "add tests ...", with little specification resulted in ```stylized_facts/tests/test_loose.py``` which generated 20 tests on synthetic invariants with zero closed-form grounding and zero coverage of calibration behavior and known failure modes.
+
+The spec'd version, utilizing a plan mode diagnosis followed by specificed tests, resulted in 132 tests across four files in ```stylized_facts/tests/```, testing physics ground truths, 35 explicitly tracked known-failing behaviours, and statistical truths. This spec'd version provided a much more comprehensive testing environment with verifiable background and allows for future test-based programming to fix the known-failing behaviours rather than just ignoring them.
