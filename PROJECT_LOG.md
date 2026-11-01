@@ -259,3 +259,49 @@ Tool: Claude Code (cloud session linked to this computer). Nothing committed.
 - `PROJECT_LOG.md` (this entry)
 
 No code, test, threshold or result file was edited.
+
+---
+
+## 2026-10-31: Feature table for `stylized_facts/README.md`
+
+Tool: Claude Code (desktop app). Nothing committed.
+
+### Prompt
+
+> Review stylized_facts/ and determine the meaning and usage of each feature. Create a table explaining each feature and append this to stylized_facts/README.md.
+
+### Steps
+
+1. Read `stylized_facts/README.md`, each script's docstring and `argparse` options, every function and class docstring in `src/ising_market/model.py` (listed with a small `ast` script), the legacy `FinancialIsingModel` methods, `model.py`'s `__main__` block, and the `MODELS` table in `compare_return_models.py`.
+2. Traced where the frozen data files come from (grep for `2005_2007`, `rets_big`, `J_big`).
+3. Appended a `## Features` section to `stylized_facts/README.md`: five tables (data, model core, calibration, simulation and measurement, analysis scripts), a legacy-code table, and a short list of gaps found. Each row gives where the feature lives, what it means, how to use it (flags or call) and what it writes. No results or findings are stated; the section points to `REPORT.md` for those.
+4. Checked three claims against the code (see Verification).
+
+### Commands run
+
+| Command | Output |
+|---|---|
+| `grep -n add_argument -A1 scripts/*.py` | Flags and defaults for all six scripts (`calibrate_real.py` has none) |
+| `ast` listing of `model.py` | 1 class (19 methods), 17 functions with signatures and docstrings |
+| `grep -rn -e 2005_2007 -e rets_big -e J_big scripts src REPORT.md ising_handover` | Only `calibrate_real.py:76–77` writes `rets_big`/`J_big`; only `make_figures.py:972–973` mentions `2005_2007` (as defaults) |
+| `grep -n target_vol model.py` | Only in the signature, docstring and one `print` (line 846) |
+| `grep -n "args\.(size\|alpha\|mode\|kappa)" model.py` | No matches: the CLI flags are never read |
+| `grep -n "ceil\|eps_ucb\|idxmin" model.py` | k = ⌈3·p75(τ_int)⌉ (line 666); winner = `idxmin` of ε + 2 SE among survivors (lines 775, 798) |
+
+### Decisions
+
+| ID | Decision | Alternatives considered | Why | Decided by |
+|---|---|---|---|---|
+| D1 | Read "feature" as each user-facing capability of the code (scripts, public functions, model parameters), grouped by pipeline stage. | One row per function including private helpers; or one row per stylized fact measured. | Matches "meaning and usage": what it does and how to run it. Private helpers are folded into the row of the feature they serve. | Claude |
+| D2 | Describe what the code does, never what it found. | Include headline numbers from `REPORT.md`. | CLAUDE.md: don't state results the code hasn't produced in this session; `REPORT.md` already holds them. | Claude |
+| D3 | List the data-file mismatch as a gap instead of guessing its cause. | Assume `rets_2005_2007.pkl` came from `calibrate_real.py`. | The code shows `calibrate_real.py` writes different file names and a much longer ticker list. | Claude |
+
+### Files changed
+
+- `stylized_facts/README.md` (appended `## Features`; the status line and its placeholder are unchanged)
+- `PROJECT_LOG.md` (this entry)
+
+### Open items
+
+- Where `data/rets_2005_2007.pkl` and `data/J_2005_2007.npy` came from is unknown. `REPORT.md` says `calibrate_real.py` freezes the data, but its code writes `rets_big.pkl` and `J_big.npy`.
+- `stylized_facts/README.md` known limits: still for the owner to fill in.
