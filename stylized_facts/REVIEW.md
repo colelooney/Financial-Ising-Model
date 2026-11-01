@@ -161,3 +161,18 @@ Written 2026-11-01 from reading the code (`src/ising_market/model.py`, all six s
 ## Suggested next step
 
 Add `stylized_facts/tests/test_known_solutions.py` with one test per row of section C, plus regression tests for A1–A3 and A8–A15. Most can run in seconds with small N and short runs. Fix the Severity 1 items after tests show the problem.
+
+## Test status (2026-11-01)
+
+The items above are now tests in `stylized_facts/tests/` (`test_spin_known.py`, `test_stats_known.py`, `test_calibration.py`, `test_edge_cases.py`). Run them with:
+
+    uv run pytest stylized_facts/tests
+
+Result: 97 passed, 35 xfailed. Each xfail is `strict=True` and pinned to the exception the current code raises. The suite stays green until a fix lands, then the matching test reports XPASS and its marker should be removed.
+
+- **Confirmed (xfail):** A1, A2 (both parts), A3 (diagonal, asymmetry, lattice L ≤ 2), A4, A5, A6, A8 (no edges), A9, A10, A11, A13 (singular OLS), A14, A15, A16, A17, A18, A19, A20, A21, A22, B8, D1, D6.
+- **Not confirmed:** A8, one-stock case. `build_empirical_J` returns a correct 1×1 J; the density is NaN with a RuntimeWarning, not a ZeroDivisionError.
+- **Passes as documented behaviour:** A12 (a frozen row is rejected), A13 (with two points the SE is NaN, not inf), B1 (lattice is disordered at T = λ_max = 4).
+- **Not tested:** A7 (no defined target behaviour), A23 (needs a second machine), B9 (site order isn't observable from outputs), D2/D3 beyond a plain import check.
+- **New observation:** for an AR(1) series with true τ_int = 99.5 and n = 20,000 (n/300 = 66), the Sokal estimate ranged from 64 to 107 over 5 seeds, and 2 of 5 runs counted as converged. The convergence check is lenient for runs that are only just long enough.
+- **Known example:** on the Curie–Weiss network (N = 29), every row's σ_m and Binder ratio match the exact values. The selected row (T0/λ = 0.839, k = 52) has ε = −1.66 ± 0.08 against an exact −1.61, and σ0 = 0.621 against an exact 0.619.

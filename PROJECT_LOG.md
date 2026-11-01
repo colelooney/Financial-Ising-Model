@@ -457,3 +457,50 @@ None of these were confirmed by running code.
 ### Open items
 
 - Turn section C of REVIEW.md into tests (`stylized_facts/tests/test_known_solutions.py`) and confirm or rule out the section A items.
+
+## 2026-11-01: pytest tests from stylized_facts/REVIEW.md
+
+### Prompt
+
+Using stylized_facts/REVIEW.md, write pytest functions into stylized_facts/tests/. Include the tests detailed in REVIEW.md, plus coverage of the magnetization range and calibration convergence to a known example. Tests for REVIEW items that currently fail should still be written, as grounding for future model fixes.
+
+### Steps
+
+1. Wrote `conftest.py` (imports model.py from a temp folder, loads the scripts by path) and `_helpers.py` (exact references: enumeration, Curie–Weiss, ring, Onsager, AR(1)).
+2. Wrote four test files and ran each one. For every xfail, ran `--runxfail` to check it fails for the reason REVIEW.md gives.
+3. Fixed problems in the tests themselves (none in the model):
+   - `test_converged_means_tau_below_n_over_300`: at n = 20,000 the windowed τ estimate is biased low (64–107 for a true 99.5), so the "not converged" case moved to n = 10,000, where the limit is 33.
+   - Kurtosis tests: `stylised_facts` now runs on 100k points with a 10% tolerance instead of 1M points with 5% (t.fit took about 38 s). `moments` is still checked on 1M points.
+   - A8 no-edges xfail: pinned to AssertionError, since a regex mismatch raises that, not Failed.
+   - A8 one-stock: the test passed unexpectedly, so the xfail was removed (REVIEW was wrong on this point).
+   - A17: the first assertion (SE > 0) was too weak. SE(a) collapses to about 0 at the bound, compared with about 0.014 away from it, so the threshold is now SE > 1e-4.
+   - Ruff sorted `tomllib` as third-party because `requires-python` says 3.9 (D1), so it is now imported inside the function.
+4. Added a "Test status" section to REVIEW.md.
+
+### Commands run
+
+| Command | Output |
+|---|---|
+| `uv run pytest stylized_facts/tests -q` | 97 passed, 35 xfailed in 13 s (includes test_loose.py) |
+| `uv run pytest stylized_facts/tests -q --runxfail` (per file) | every xfail fails with the expected message |
+| `uv run ruff check stylized_facts/tests --exclude stylized_facts/tests/test_loose.py` | All checks passed |
+| Curie–Weiss calibration (N = 29, seed 42) | T0/λ = 0.839, k = 52, ε = −1.66 ± 0.08 (exact −1.61), σ0 = 0.621 (exact 0.619) |
+
+### Decisions
+
+| ID | Decision | Why | Decided by |
+|---|---|---|---|
+| D1 | Failing REVIEW items are `xfail(strict=True)` with a pinned `raises=`. | Suite stays green; a fix flips the test to XPASS; a test bug can't hide behind the marker. | Claude |
+| D2 | Statistical tolerances are 5 SE of independent seeded run means plus a small floor. | Seeded and deterministic, with an honest margin. | Claude |
+| D3 | A7, A23 and B9 were not tested. | No defined target behaviour, or not observable on one machine or from outputs. | Claude |
+
+### Files changed
+
+- `stylized_facts/tests/conftest.py`, `_helpers.py`, `test_spin_known.py`, `test_stats_known.py`, `test_calibration.py`, `test_edge_cases.py` (new)
+- `stylized_facts/REVIEW.md` (Test status section added)
+- `PROJECT_LOG.md` (this entry)
+
+### Open items
+
+- The root `testpaths = ["tests"]` still doesn't point here (D6), so pass `stylized_facts/tests` explicitly.
+- `conftest.py` is shared with `test_loose.py`. It defines only new fixture names (`im`, `crm`, `mf`, `gx`, `kuf`), and test_loose.py still passes.
