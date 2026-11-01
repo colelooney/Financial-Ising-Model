@@ -135,3 +135,127 @@ All runs were from `stylized_facts/`, with output sent to a temporary scratch fo
 - The `data/`, `patches/` and `ising_handover/` ignore rules aren't tied to a folder, so they would also ignore folders with those names inside `early_warning/`.
 - `stylized_facts/tests/` is still ignored, so it has no `.gitkeep`.
 - Nothing committed; new files need `git add`.
+
+---
+
+## 2026-10-22: Add CLAUDE.md
+
+Tool: Claude Code (desktop app). Nothing committed.
+
+### Prompts
+
+**Prompt 1:** `/init`, the built-in command that analyzes the codebase and writes a `CLAUDE.md` for future Claude Code sessions (commands, high-level architecture, important parts of the README, no generic advice).
+
+### Steps
+
+1. Checked for existing agent instruction files (`CLAUDE.md`, `.cursorrules`, `.cursor/`, `.github/copilot-instructions.md`, Codex and Gemini configs). None exist.
+2. Read the outline of `stylized_facts/src/ising_market/model.py`, the calibration and deployment code, the docstrings of `make_figures.py` and `compare_return_models.py`, and the layout, setup, reproduction, calibration and known-limits sections of `stylized_facts/REPORT.md`.
+3. Wrote `CLAUDE.md` at the repo root: working rules (log every session, never commit, leave `DECISIONS.md` and placeholders alone), the two-project layout and the independence rule, commands, the data flow between scripts, the model's architecture, and gotchas.
+4. Checked two claims against the code: `uv run ruff check .` runs, and `garch_x_breadth.py` and `compare_return_models.py` don't import `ising_market`.
+
+### Decisions
+
+| ID | Decision | Alternatives considered | Why | Decided by |
+|---|---|---|---|---|
+| D1 | Put the session-logging and no-commit rules at the top of `CLAUDE.md`. | Rely only on Claude's per-user memory. | `CLAUDE.md` is in the repo, so the rules apply to any Claude Code session on any machine. | Claude |
+| D2 | Tell future sessions to run script checks with `--out` pointed at a scratch folder and to prefer `--replot`. | List the full reproduction commands from `REPORT.md`. | `results/` is committed and full runs overwrite it; some runs take hours or download from Yahoo. | Claude |
+| D3 | Note the existing ruff errors and say not to mass-fix them unasked. | Fix them; or leave them out. | Fixing would edit moved files, against the reorganization's rules. | Claude |
+| D4 | Write a single-test command with an explicit path. | Use bare `uv run pytest`. | `testpaths = ["tests"]` points at a root `tests/` that no longer exists. | Claude |
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `uv run ruff check .` | Runs; reports 45 existing errors (5 auto-fixable). Nothing fixed. |
+| `grep ising_market` in `garch_x_breadth.py`, `compare_return_models.py` | 0 matches in both, matching the data-flow notes |
+
+### Open items
+
+- The pytest `testpaths` setting in `pyproject.toml` points at a root `tests/` that doesn't exist. It could be changed to `["early_warning/tests"]` once early-warning tests exist.
+- 45 existing ruff errors in `stylized_facts/`.
+- `CLAUDE.md` is untracked; it needs `git add`.
+
+---
+
+## 2026-10-31: Explain why kurtosis stays at 1.3–2.5
+
+Tool: Claude Code (cloud session linked to this computer). Nothing committed.
+
+### Prompts
+
+**Prompt 1:** Review the codebase, particularly `stylized_facts/`, and explain in one pass why the model's kurtosis stayed at 1.3–2.5 instead of producing fat tails.
+
+### Steps
+
+1. Read `CLAUDE.md`, `PROJECT_LOG.md`, `stylized_facts/REPORT.md` (tail, Binder and feedback sections), `model.py` (`compute_return`, `_metropolis_pilot`, `_deploy_kernel`, `simulate_deployed`), `results/figures/summary.md` and `ising_handover/tests/t11_tails.py` with its log.
+2. Copied `model.py` and `J_2005_2007.npy`, `J_us100_2005_2024.npy` to a scratch folder outside the repo and reran the repo's own numba kernels there: equilibrium kurtosis of m against T/λ on both networks, the largest standardised |r| in deployed runs at G = 0, 0.5, 1.0, and a scale-mixing decomposition at G = 0.5, 1.0, 1.25.
+3. Wrote the exchange to `CHAT.md` (new file) per the project instructions.
+
+### Findings (all from the reruns in step 2)
+
+| Check | Result |
+|---|---|
+| Equilibrium kurtosis of m, 29 stocks, T/λ 0.60 → 4.0 | 1.17, 1.42, 1.64, 1.89, 2.12, 2.46, 2.78, 2.88 |
+| Same, 100 stocks, T/λ 0.75 → 4.0 | 1.08, 1.26 (0.84), 1.74, 2.26, 2.74, 2.93, 2.97; the 0.60λ run (3.74) is stuck in one well |
+| Largest standardised \|r\|, 29 stocks, T0 = 0.936λ, k = 18 | 2.30 (G = 0), 2.30 (G = 0.5), 2.36 (G = 1.0); hard cap 1/σ_m = 2.32 |
+| Scale-mixing factor E[s⁴]/E[s²]² | 1.03 (G = 0.5), 1.28 (G = 1.0), 1.63 (G = 1.25) |
+
+Not rerun: the full calibration and the 100-stock deployed model (k = 248). The 100-stock numbers are equilibrium only.
+
+### Files changed
+
+- `CHAT.md` (new)
+- `PROJECT_LOG.md` (this entry)
+
+No code, test, threshold or result file was edited.
+
+---
+
+## 2026-10-31: Second pass — state and prove the kurtosis cap
+
+Tool: Claude Code (cloud session linked to this computer). Nothing committed.
+
+### Prompts
+
+**Prompt 1:** Now conduct a second pass: state the mechanism precisely and thoroughly explain why that mechanism caps the fourth moment.
+
+### Steps
+
+1. Derived the cap from the Lee–Yang theorem: for a zero-field ferromagnet (J ≥ 0, h = 0) the characteristic function of M has only real zeros, giving kurt(M) = 3 − 6/N_eff + 4/U ≤ 3 − 2/N.
+2. Tested it in a scratch folder outside the repo, using copies of `model.py` and the saved J matrices:
+   - exact enumeration of all 2^N states on 12- and 13-spin sub-blocks of the 29-stock J, comparing exact kurtosis with the formula from the zeros;
+   - an all-to-all ferromagnet in the ordered limit;
+   - controls that break the hypotheses: random-sign couplings, and a heavy-tailed common random field;
+   - the variance range of m across the calibrated window, for both networks;
+   - the deployed 29-stock model at G = 0.5, 1.0, 1.25 against the mixture bound (3 − 2/N)·E[σ⁴]/E[σ²]².
+3. Appended the exchange to `CHAT.md`.
+
+### Findings (all from the reruns in step 2)
+
+| Check | Result |
+|---|---|
+| Exact kurtosis vs formula from zeros, N = 12, 13, T/λ 0.6–5.0 | Agree to 4 decimals; cap 3 − 2/N never exceeded (margin ≥ 0.07); roots on unit circle to ≤ 8e-6 |
+| All-to-all ferromagnet, N = 12, T = 3 | kurtosis 1.0008, N_eff = 2.96 |
+| Random-sign couplings, N = 13, 160 draws | max kurtosis 3.27 (cap 2.846), so the cap needs J ≥ 0 |
+| Heavy-tailed common field, N = 13, T/λ 1–10 | kurtosis stays at or below the h = 0 value; no route to fat tails found |
+| var(m) range, 29 stocks 0.60–1.30λ | 0.493 → 0.094 (5.2×); max mixture factor 1.86 |
+| var(m) range, 100 stocks 0.75–1.30λ | 0.524 → 0.038 (13.8×); max mixture factor 3.97 |
+| Deployed 29 stocks, G = 0.5 / 1.0 / 1.25 | kurtosis 1.90 / 2.08 / 2.46; factor 1.027 / 1.305 / 1.652; bound 3.01 / 3.83 / 4.84 |
+
+### Corrections to the earlier entry
+
+- Bounded support gives only kurt ≤ 1/σ_m² (5.4 at the selected 29-stock row), so it explains the maximum |z| but is not the cap on the fourth moment.
+- The suggested exogenous news-field route did not raise kurtosis in the N = 13 test and is withdrawn.
+
+### Not done
+
+- No proof for the deployed chain with time-varying T (only the quasi-equilibrium mixture bound plus numerical checks).
+- Exact enumeration only up to N = 13; the field-compression explanation (GHS) is a hypothesis.
+- Theorem citations (Lee–Yang, Lebowitz, Newman) are from memory.
+
+### Files changed
+
+- `CHAT.md` (second exchange appended)
+- `PROJECT_LOG.md` (this entry)
+
+No code, test, threshold or result file was edited.
